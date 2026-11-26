@@ -1132,6 +1132,7 @@ HELP = {'hospital': 'Hospital', 'clinic': 'Clinic', 'doctors': 'Doctor', 'pharma
         'embassy': 'Embassy', 'mineral': 'Recorded mineral / mine', 'oil_gas_well': 'Recorded oil / gas well',
         'boat_launch': 'Boating facility', 'fish_stocking': 'Fish-stocking record',
         'ferry_terminal': 'Ferry terminal',   # the way off an island (Dutch maps: tools/build_region_nl.py)
+        'defibrillator': 'AED (defibrillator)',   # Dutch maps: OpenStreetMap via tools/build_region_nl.py aed
         'dam': 'Dam (National Inventory of Dams)', 'reservoir': 'Reservoir', 'lake': 'Lake or pond', 'pond': 'Pond',
         'orchard': 'Orchard', 'vineyard': 'Vineyard', 'berries': 'Berry field', 'perennial_veg': 'Asparagus field'}
 

@@ -10,6 +10,8 @@ import sqlite3
 import struct
 import tempfile
 import unittest
+import urllib.error
+import urllib.parse
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -332,9 +334,9 @@ class WholeBuild(unittest.TestCase):
     """fetch's output in, a checked data folder out."""
 
     LOW = {'roads': 10, 'addresses': 100, 'hospital': 1, 'pharmacy': 1, 'fire_station': 1, 'police': 1,
-           'island_roads': 3, 'island_addresses': 20}
+           'island_roads': 3, 'island_addresses': 20, 'aeds': 2}
 
-    def build(self, code, features, roads, pois, places=(), ferries=None):
+    def build(self, code, features, roads, pois, places=(), ferries=None, aeds=None):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
@@ -360,6 +362,9 @@ class WholeBuild(unittest.TestCase):
                 'osm.gpkg.zip': {'name': f'{nl.SLUG}-261124.gpkg.zip', 'data_as_of': '2026-11-24T21:00:00Z'},
                 'bag': {'served_at': '2026-11-25T10:00:00Z'}}}
             (source / 'fetched.json').write_text(json.dumps(fetched), encoding='utf-8')
+            if aeds is not None:
+                (source / 'aeds.json').write_text(json.dumps({'fetched': '2026-11-26T18:00:00+00:00', 'osm_as_of': '2026-11-26T17:55:00Z',
+                                                              'points': aeds, 'not_public_left_out': 0}), encoding='utf-8')
             with mock.patch.multiple(nl, BASE=base, SOURCE=source, DATA=base / 'data', MINIMUM=self.LOW, log=lambda *a: None):
                 try:
                     nl.build()
@@ -432,6 +437,25 @@ class WholeBuild(unittest.TestCase):
                          [('Schiermonnikoog', 'Schiermonnikoog')])
         addr.close()
 
+    def test_a_saved_aed_list_goes_into_the_build(self):
+        features = [feature(i, number=str(i), lon=4.3700 + i * 1e-5) for i in range(1, 200)]
+        features += [feature(1000, street='Rotterdamseweg', number='374', letter='A', code='2629HG'),
+                     feature(1001, street='Lorentzweg', number='1', code='2628CJ'), feature(1002, number='4'),
+                     feature(1003, street='Burg. Jansenstraat', number='7', code='2611AA', place='Den Haag')]
+        pois = [('hospital', 'Reinier de Graaf', 4.36, 52.01), ('pharmacy', 'Apotheek Delft', 4.358, 52.012),
+                ('fire_station', 'Kazerne Delft', 4.355, 52.0), ('police', 'Politie Delft', 4.357, 52.008)]
+        aeds = [['AED: gevel sporthal (24/7)', 4.36, 52.005], ['AED', 4.361, 52.006]]
+        failures, geo = self.build('ZH', features, [(4.37 + i * 1e-4, 52.0) for i in range(30)], pois,
+                                   [('town', 'Delft', 4.357, 52.011)], aeds=aeds)
+        self.assertEqual(failures, [])
+        nat = sqlite3.connect(geo / 'national.sqlite')
+        self.assertEqual(sorted(n for n, in nat.execute("SELECT name FROM poi WHERE cls='defibrillator'")),
+                         ['AED', 'AED: gevel sporthal (24/7)'])
+        self.assertIn('AEDs: OpenStreetMap via the Overpass API', dict(nat.execute('SELECT key, value FROM meta'))['help_points'])
+        nat.close()
+        report = json.loads((geo.parents[1] / 'build.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['counts']['aeds'], 2)
+
     def test_an_island_left_out_fails_the_check(self):
         """A box or an extract that misses Schiermonnikoog must not pass as Fryslân."""
         features = [feature(i, street='Dorpsstraat', number=str(i), code='8911HG', place='Leeuwarden', prov='Fr',
@@ -441,6 +465,129 @@ class WholeBuild(unittest.TestCase):
         failures, _ = self.build('FR', features, [(5.79 + k * 1e-4, 53.20) for k in range(20)], pois)
         self.assertTrue(any('island Schiermonnikoog' in f for f in failures), failures)
         self.assertTrue(any('Heereweg 8' in f for f in failures), failures)
+
+
+class AEDs(unittest.TestCase):
+    """AEDs from OpenStreetMap through the Overpass API (no network here: a stand-in answers as Overpass does)."""
+
+    ANSWER = {'osm3s': {'timestamp_osm_base': '2026-11-26T17:55:00Z'}, 'elements': [
+        {'type': 'node', 'id': 1, 'lat': 53.2, 'lon': 5.8,
+         'tags': {'emergency': 'defibrillator', 'defibrillator:location': 'Aan de gevel van de sporthal', 'opening_hours': '24/7'}},
+        {'type': 'node', 'id': 2, 'lat': 53.21, 'lon': 5.81, 'tags': {'emergency': 'defibrillator'}},
+        {'type': 'way', 'id': 3, 'center': {'lat': 53.22, 'lon': 5.82},
+         'tags': {'emergency': 'defibrillator', 'name': 'AED Dorpshuis', 'opening_hours': 'Mo-Fr 08:00-17:00'}},
+        {'type': 'node', 'id': 4, 'lat': 53.23, 'lon': 5.83, 'tags': {'emergency': 'defibrillator', 'access': 'private'}},
+        {'type': 'relation', 'id': 5, 'tags': {'emergency': 'defibrillator'}}]}          # no position: skipped
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name) / 'NL-FR'
+        patcher = mock.patch.multiple(nl, SHARED=Path(tmp.name) / 'NL-shared', log=lambda *a: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        nl.select('FR')
+        patcher = mock.patch.multiple(nl, BASE=self.base, SOURCE=self.base / 'source', DATA=self.base / 'data')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def overpass(self, *answers):
+        """A stand-in for urlopen: each call takes the next answer, an exception is raised."""
+        calls = []
+
+        class Reply:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(self.body).encode('utf-8')
+
+        def urlopen(request, timeout=None):
+            calls.append(urllib.parse.parse_qs(request.data.decode('utf-8'))['data'][0])
+            answer = answers[len(calls) - 1]
+            if isinstance(answer, Exception):
+                raise answer
+            return Reply(answer)
+        return urlopen, calls
+
+    def test_names_say_where_and_when(self):
+        points, private = nl.aed_points(self.ANSWER)
+        self.assertEqual([p[0] for p in points], ['AED: Aan de gevel van de sporthal (24/7)', 'AED',
+                                                  'AED: AED Dorpshuis (Mo-Fr 08:00-17:00)'])
+        self.assertEqual(points[2][1:], (5.82, 53.22))       # a way: its centre
+        self.assertEqual(private, 1)
+
+    def test_fetch_asks_by_the_province_boundary_and_keeps_the_list(self):
+        urlopen, calls = self.overpass(self.ANSWER)
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen):
+            saved = nl.fetch_aeds()
+            again = nl.fetch_aeds()                           # younger than OSM_MAX_AGE: not asked again
+        self.assertEqual(len(calls), 1)
+        self.assertIn('area["ISO3166-2"="NL-FR"]', calls[0])
+        self.assertIn('nwr["emergency"="defibrillator"]', calls[0])
+        self.assertEqual(saved['osm_as_of'], '2026-11-26T17:55:00Z')
+        self.assertEqual(len(saved['points']), 3)
+        self.assertEqual(again['points'], saved['points'])
+        self.assertTrue((self.base / 'source' / 'aeds.json').is_file())
+
+    def test_a_busy_overpass_is_asked_again(self):
+        busy = urllib.error.HTTPError(nl.OVERPASS, 429, 'Too Many Requests', {}, None)
+        urlopen, calls = self.overpass(busy, self.ANSWER)
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen), mock.patch.object(nl.time, 'sleep') as slept:
+            saved = nl.fetch_aeds()
+        self.assertEqual(len(calls), 2)
+        slept.assert_called_once_with(30)
+        self.assertEqual(len(saved['points']), 3)
+
+    def test_an_unfinished_query_is_not_kept(self):
+        urlopen, _ = self.overpass({'remark': 'runtime error: Query timed out', 'elements': []})
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen), self.assertRaises(SystemExit):
+            nl.fetch_aeds()
+        self.assertFalse((self.base / 'source' / 'aeds.json').exists())
+
+    def test_the_aed_step_adds_them_to_a_built_map_in_place(self):
+        geo = self.base / 'data' / 'derived' / 'geo'
+        geo.mkdir(parents=True)
+        db = sqlite3.connect(geo / 'national.sqlite')
+        db.executescript("CREATE TABLE poi(id INTEGER PRIMARY KEY, cls TEXT, name TEXT, lon REAL, lat REAL);"
+                         "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);"
+                         "INSERT INTO poi(cls, name, lon, lat) VALUES ('pharmacy', 'Apotheek', 5.79, 53.2);"
+                         "INSERT INTO meta VALUES ('help_points', 'all classes: OpenStreetMap (ODbL 1.0)');")
+        db.commit()
+        db.close()
+        (self.base / 'data' / 'build.json').write_text(json.dumps({'counts': {}, 'outputs': {}}), encoding='utf-8')
+        (self.base / 'data' / 'map-set.json').write_text(json.dumps({'files': {'derived/geo/national.sqlite': 1}, 'bytes': 1}),
+                                                         encoding='utf-8')
+        urlopen, _ = self.overpass(self.ANSWER)
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen):
+            nl.aed()
+            nl.aed()                                          # again: the same AEDs, not twice
+        db = sqlite3.connect(geo / 'national.sqlite')
+        self.assertEqual(db.execute("SELECT count(*) FROM poi WHERE cls='defibrillator'").fetchone()[0], 3)
+        self.assertEqual(db.execute("SELECT count(*) FROM poi WHERE cls='pharmacy'").fetchone()[0], 1)
+        help_points = dict(db.execute('SELECT key, value FROM meta'))['help_points']
+        db.close()
+        self.assertEqual(help_points.count('; AEDs'), 1)
+        report = json.loads((self.base / 'data' / 'build.json').read_text(encoding='utf-8'))
+        size = (geo / 'national.sqlite').stat().st_size
+        self.assertEqual(report['counts']['aeds'], 3)
+        self.assertEqual(report['outputs']['derived/geo/national.sqlite']['bytes'], size)
+        self.assertEqual(report['sources']['files']['aeds.json']['not_public_left_out'], 1)
+        map_set = json.loads((self.base / 'data' / 'map-set.json').read_text(encoding='utf-8'))
+        self.assertEqual(map_set['bytes'], size)
+
+    def test_a_province_not_built_keeps_its_list_for_the_build(self):
+        urlopen, _ = self.overpass(self.ANSWER)
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen):
+            nl.aed()
+        self.assertTrue((self.base / 'source' / 'aeds.json').is_file())
+        self.assertFalse((self.base / 'data').exists())
 
 
 class MapBesideTheLibrary(unittest.TestCase):
@@ -479,7 +626,8 @@ class MergeTheCountry(unittest.TestCase):
             db.execute('INSERT INTO feat_idx VALUES (?, ?, ?, ?, ?, ?, ?)', (i, box[0], box[2], box[1], box[3], 8, 20))
         db.executemany('INSERT INTO poi(cls, name, lon, lat) VALUES (?, ?, ?, ?)', pois)
         db.executemany('INSERT INTO meta VALUES (?, ?)', [('region', f'NL-{code}'), ('bounds', ','.join(map(str, box))),
-                                                           ('data_as_of', '2026-11-24T21:21:23Z')])
+                                                           ('data_as_of', '2026-11-24T21:21:23Z'),
+                                                           ('help_points', 'all classes: OpenStreetMap (ODbL 1.0); AEDs: OpenStreetMap via the Overpass API, as of 2026-11-26T17:55:00Z (ODbL 1.0)')])
         db.commit()
         db.close()
         m = sqlite3.connect(geo / 'map.sqlite')
@@ -516,6 +664,7 @@ class MergeTheCountry(unittest.TestCase):
             meta = dict(db.execute('SELECT key, value FROM meta').fetchall())
             db.close()
             self.assertEqual(meta['region'], 'NL')
+            self.assertIn('; AEDs: OpenStreetMap via the Overpass API', meta['help_points'])
             self.assertEqual(meta['bounds'], '4.4000,52.1000,6.4000,53.6000')
             p = sqlite3.connect(geo / 'places.sqlite')
             self.assertEqual(p.execute('SELECT count(*) FROM place').fetchone()[0], 2)          # Grensdorp once

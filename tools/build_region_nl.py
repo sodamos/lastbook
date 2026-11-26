@@ -443,6 +443,10 @@ def fetch():
                                     'official_box': CODE in boxes.get('boxes', {})}
     (SOURCE / 'fetched.json').write_text(json.dumps(fetched, indent=1, ensure_ascii=False), encoding='utf-8')
     log('fetched', REGION, '; BAG addresses in', NAME, count)
+    try:
+        fetch_aeds(force=REFRESH)
+    except SystemExit as error:      # the map is complete without them; aed --province fetches them later
+        log('AEDs not fetched:', error)
 
 
 # ------------------------------------------------------------------ build ----
@@ -541,6 +545,132 @@ def ferry_terminals(gpkg):
     finally:
         src.close()
     return found, layer
+
+
+# ------------------------------------------------------------------- AEDs ----
+
+# Geofabrik's free extract keeps no AEDs, so they come from OpenStreetMap itself through the Overpass API: the same data
+# and licence as the rest of the map, one query per province by its official ISO 3166-2 boundary in OpenStreetMap.
+OVERPASS = 'https://overpass-api.de/api/interpreter'
+AED_QUERY = ('[out:json][timeout:180];'
+             'area["ISO3166-2"="{region}"]["boundary"="administrative"]->.province;'
+             'nwr["emergency"="defibrillator"](area.province);out center tags;')
+AED_LICENCE = 'Open Database License 1.0 (ODbL)'
+NOT_PUBLIC = {'private', 'no'}      # access=private or no: behind a door the public cannot open, so not on this map
+
+
+def aed_name(tags):
+    """'AED', where it hangs and when it can be reached, in OpenStreetMap's own words: 'AED: gevel sporthal (24/7)'."""
+    where = next((tags[k].strip() for k in ('defibrillator:location:nl', 'defibrillator:location', 'name', 'operator')
+                  if (tags.get(k) or '').strip()), '')
+    hours = (tags.get('opening_hours') or '').strip()
+    name = 'AED' + (f': {where}' if where else '') + (f' ({hours})' if hours else '')
+    return name[:160]
+
+
+def aed_points(answer):
+    """([(name, lon, lat), ...], how many were left out as not public) from an Overpass answer."""
+    points, private = [], 0
+    for element in answer.get('elements', []):
+        tags = element.get('tags') or {}
+        centre = element.get('center') or {}
+        lat, lon = element.get('lat', centre.get('lat')), element.get('lon', centre.get('lon'))
+        if lat is None or lon is None:
+            continue
+        if (tags.get('access') or '').strip().lower() in NOT_PUBLIC:
+            private += 1
+            continue
+        points.append((aed_name(tags), round(float(lon), 7), round(float(lat), 7)))
+    return points, private
+
+
+def fetch_aeds(force=False):
+    """This province's AEDs, saved to source/aeds.json; a list younger than OSM_MAX_AGE days is used again unless force
+    (--refresh). Returns what was saved."""
+    path = SOURCE / 'aeds.json'
+    if path.exists() and not force:
+        age = (time.time() - path.stat().st_mtime) / 86400
+        if age < OSM_MAX_AGE:
+            log('AEDs: using the list fetched', round(age, 1), 'days ago (--refresh asks again)')
+            return json.loads(path.read_text(encoding='utf-8'))
+    query = AED_QUERY.format(region=REGION)
+    log('AEDs (OpenStreetMap, Overpass API)', REGION)
+    body = urllib.parse.urlencode({'data': query}).encode('utf-8')
+    answer = None
+    for attempt in range(4):
+        try:
+            request = urllib.request.Request(OVERPASS, data=body, headers={'User-Agent': 'lastbook-region-builder'})
+            with urllib.request.urlopen(request, timeout=240) as response:
+                answer = json.loads(response.read().decode('utf-8'))
+            break
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ValueError) as error:
+            # Overpass answers 429 or 504 when it is busy: wait, then ask once more, a few times at most.
+            if attempt == 3:
+                raise SystemExit(f'{REGION}: the Overpass API did not answer ({error}); run aed --province {CODE} later')
+            log('Overpass busy or unreachable:', error, '; asking again in', 30 * (attempt + 1), 's')
+            time.sleep(30 * (attempt + 1))
+    if answer.get('remark'):         # a query that ran out of time or memory still answers 200, with a remark
+        raise SystemExit(f'{REGION}: Overpass did not finish the query: {answer["remark"]}')
+    points, private = aed_points(answer)
+    saved = {'fetched': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+             'osm_as_of': (answer.get('osm3s') or {}).get('timestamp_osm_base'), 'url': OVERPASS, 'query': query,
+             'licence': AED_LICENCE, 'attribution': '© OpenStreetMap contributors',
+             'not_public_left_out': private, 'points': [list(p) for p in points]}
+    SOURCE.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(saved, ensure_ascii=False), encoding='utf-8')
+    log('AEDs in', NAME, len(points), f'({private} marked private, left out)')
+    return saved
+
+
+def aed_source(saved):
+    """What build.json records about the AED list."""
+    return {k: saved.get(k) for k in ('url', 'osm_as_of', 'fetched', 'licence', 'attribution', 'not_public_left_out')}
+
+
+def add_aeds(national, saved):
+    """The AEDs as help points of class 'defibrillator', in place of any already there; returns how many."""
+    db = sqlite3.connect(national)
+    try:
+        db.execute("DELETE FROM poi WHERE cls = 'defibrillator'")
+        db.executemany('INSERT INTO poi(cls, name, lon, lat) VALUES (?, ?, ?, ?)',
+                       [('defibrillator', name, lon, lat) for name, lon, lat in saved['points']])
+        meta = dict(db.execute('SELECT key, value FROM meta').fetchall())
+        base = (meta.get('help_points') or 'all classes: OpenStreetMap (ODbL 1.0)').split('; AEDs')[0]
+        db.execute('INSERT OR REPLACE INTO meta VALUES (?, ?)', (
+            'help_points', f"{base}; AEDs: OpenStreetMap via the Overpass API, as of "
+                           f"{saved.get('osm_as_of') or saved.get('fetched')} (ODbL 1.0)"))
+        db.commit()
+    finally:
+        db.close()
+    return len(saved['points'])
+
+
+def aed():
+    """Fetches this province's AEDs and adds them to its built map in place, without a rebuild; build.json and
+    map-set.json follow. A later build keeps them (it reads source/aeds.json)."""
+    saved = fetch_aeds(force=REFRESH)
+    data = BASE / 'data'
+    national = data / 'derived' / 'geo' / 'national.sqlite'
+    if not national.is_file():
+        log(REGION, 'is not built yet: its AEDs are saved and go in with its build')
+        return
+    count = add_aeds(national, saved)
+    name = national.relative_to(data).as_posix()
+    report_path = data / 'build.json'
+    if report_path.exists():
+        report = json.loads(report_path.read_text(encoding='utf-8'))
+        report.setdefault('counts', {})['aeds'] = count
+        report.setdefault('sources', {}).setdefault('files', {})['aeds.json'] = aed_source(saved)
+        report.setdefault('outputs', {})[name] = {'bytes': national.stat().st_size, 'sha256': de.sha256(national)}
+        report_path.write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding='utf-8')
+    map_set = data / 'map-set.json'
+    if map_set.exists():
+        listed = json.loads(map_set.read_text(encoding='utf-8'))
+        if name in listed.get('files', {}):
+            listed['files'][name] = national.stat().st_size
+            listed['bytes'] = sum(listed['files'].values())
+            map_set.write_text(json.dumps(listed, indent=1), encoding='utf-8')
+    log(REGION, count, 'AEDs on the map')
 
 
 def build_addresses(fetched, geo):
@@ -658,6 +788,10 @@ def build():
     counts = {}
     log('map (OpenStreetMap)')
     counts.update(build_map(fetched, geo))
+    if (SOURCE / 'aeds.json').is_file():
+        saved = json.loads((SOURCE / 'aeds.json').read_text(encoding='utf-8'))
+        counts['aeds'] = add_aeds(geo / 'national.sqlite', saved)
+        fetched.setdefault('files', {})['aeds.json'] = aed_source(saved)
     log('addresses (BAG)')
     counts.update(build_addresses(fetched, geo))
     log('places')
@@ -714,7 +848,7 @@ SAMPLE_ADDRESSES = {
 # The least a province holds; Flevoland, the smallest, has about 180,000 addresses. Per inhabited island: streets drawn
 # and addresses (Vlieland, the smallest, has about a thousand people).
 MINIMUM = {'roads': 10000, 'addresses': 100000, 'hospital': 1, 'pharmacy': 10, 'fire_station': 5, 'police': 2,
-           'island_roads': 20, 'island_addresses': 100}
+           'island_roads': 20, 'island_addresses': 100, 'aeds': 20}
 
 
 def check(data=None):
@@ -757,6 +891,11 @@ def check(data=None):
     meta = dict(nat.execute('SELECT key,value FROM meta'))
     expect(meta.get('region') == REGION and 'OpenStreetMap' in meta.get('source', ''), f"map meta: region {meta.get('region')}, source named")
     counts = report.get('counts', {})
+    aeds = nat.execute("SELECT count(*) FROM poi WHERE cls='defibrillator'").fetchone()[0]
+    if 'aeds' in counts or aeds:
+        expect(aeds >= MINIMUM['aeds'], f"AEDs (OpenStreetMap): {aeds:,} (expected at least {MINIMUM['aeds']})")
+    else:          # a map without them still works; aed --province adds them
+        print(f'note  no AEDs on this map yet (python3 tools/build_region_nl.py aed --province {CODE})')
     holes = (report.get('sources', {}).get('files', {}).get('bag') or {}).get('holes') or []
     # Reported, not failed: a box PDOK will not serve is about 200 m across; fetch asks for it again each time.
     print(('note  ' if holes else 'ok    ') + f'BAG boxes left out after PDOK errors: {len(holes)}'
@@ -862,7 +1001,7 @@ def merge(codes=None, out=None):
     db.executescript('PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA page_size=8192;')
     for sql in schema:
         db.execute(sql)
-    bounds, as_of, kept, twice = [], [], 0, 0
+    bounds, as_of, kept, twice, aed_note = [], [], 0, 0, ''
     for code, g in built:
         log('merging', f'NL-{code}')
         db.execute('ATTACH ? AS src', (str(g / 'national.sqlite'),))
@@ -882,6 +1021,8 @@ def merge(codes=None, out=None):
             bounds.append([float(v) for v in meta['bounds'].split(',')])
         if meta.get('data_as_of'):
             as_of.append(meta['data_as_of'])
+        if '; AEDs' in meta.get('help_points', ''):
+            aed_note = meta['help_points'].split('; ', 1)[1]
         db.commit()
         db.execute('DETACH src')
     box = ','.join(f'{v:.4f}' for v in (min(b[0] for b in bounds), min(b[1] for b in bounds),
@@ -891,7 +1032,7 @@ def merge(codes=None, out=None):
         ('data_as_of', min(as_of) if as_of else ''),
         ('source', 'OpenStreetMap contributors, via Geofabrik province extracts (ODbL 1.0): '
                    + ', '.join(f'NL-{c}' for c, _ in built)),
-        ('help_points', 'all classes: OpenStreetMap (ODbL 1.0)')])
+        ('help_points', 'all classes: OpenStreetMap (ODbL 1.0)' + (f'; {aed_note}' if aed_note else ''))])
     db.commit()
     db.close()
 
@@ -944,9 +1085,9 @@ def merge(codes=None, out=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge'))
+    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge', 'aed'))
     parser.add_argument('--province', required=True, help='two-letter code (' + ', '.join(PROVINCES) + ') or all')
-    parser.add_argument('--refresh', action='store_true', help='fetch: download the OpenStreetMap extract even if recent')
+    parser.add_argument('--refresh', action='store_true', help='fetch, aed: download the OpenStreetMap extract and the AEDs even if recent')
     args = parser.parse_args()
     if args.step == 'merge':      # the provinces already built, as one map of the whole country
         merge(None if args.province.lower() == 'all' else [c.strip().upper().removeprefix('NL-') for c in args.province.split(',')])
@@ -969,7 +1110,7 @@ def main():
                 failed.append(REGION)
             continue
         try:
-            {'fetch': fetch, 'build': build, 'demo': demo}[args.step]()
+            {'fetch': fetch, 'build': build, 'demo': demo, 'aed': aed}[args.step]()
         except SystemExit as error:     # with all provinces, one that fails does not stop the others
             if len(codes) == 1:
                 raise
