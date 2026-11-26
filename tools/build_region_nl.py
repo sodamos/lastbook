@@ -608,11 +608,13 @@ def fetch_aeds(force=False):
         for url in OVERPASS:
             try:
                 request = urllib.request.Request(url, data=body, headers={'User-Agent': 'lastbook-region-builder'})
-                with urllib.request.urlopen(request, timeout=240) as response:
+                with urllib.request.urlopen(request, timeout=200) as response:   # the query's own limit is 180 s
                     answer = json.loads(response.read().decode('utf-8'))
                 served_by = url
                 break
-            except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ValueError) as error:
+            # OSError covers a refused or dropped connection and, on Python 3.9, socket.timeout (a busy instance that
+            # accepts the request and then says nothing), which is not yet a TimeoutError there.
+            except (OSError, http.client.HTTPException, ValueError) as error:
                 host = urllib.parse.urlsplit(url).hostname
                 failures.append(f'{host}: {error}')
                 log('Overpass', host, 'busy or unreachable:', error)

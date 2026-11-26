@@ -548,6 +548,17 @@ class AEDs(unittest.TestCase):
         self.assertEqual(saved['url'], nl.OVERPASS[1])
         self.assertEqual(len(saved['points']), 3)
 
+    def test_an_instance_that_hangs_hands_over_too(self):
+        """Python 3.9 raises socket.timeout, an OSError that is not yet a TimeoutError, when an instance never answers."""
+        class Hung(OSError):
+            pass
+        urlopen, calls = self.overpass(Hung('The read operation timed out'), ConnectionResetError(54, 'reset'), self.ANSWER)
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen), mock.patch.object(nl.time, 'sleep') as slept:
+            saved = nl.fetch_aeds()
+        self.assertEqual([url for url, _ in calls], nl.OVERPASS[:3])
+        slept.assert_not_called()
+        self.assertEqual(saved['url'], nl.OVERPASS[2])
+
     def test_all_down_waits_and_tries_them_again(self):
         busy = [urllib.error.HTTPError(u, 504, 'Gateway Timeout', {}, None) for u in nl.OVERPASS]
         urlopen, calls = self.overpass(*busy, self.ANSWER)
