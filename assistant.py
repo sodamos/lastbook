@@ -6,7 +6,7 @@ gazetteer) and nothing else: no file paths, URLs or shell input are accepted fro
 """
 import base64, json, re, socket, sqlite3, threading, time, urllib.error, urllib.request
 import retrieval
-from engine import encyclopedias
+from engine import encyclopedias, dutch_query
 from engine.paths import ro_uri
 from engine import page_tables
 
@@ -111,6 +111,7 @@ def _allowed(kind):
 
 def hybrid(q, k=8, kind='any', doc=None):
     """Best passages for q from keyword and meaning-based search, fused, with provenance."""
+    q = dutch_query.to_english(q)[0]     # a Dutch question is looked up in the English words the manuals use
     cat = S.catalog()
     allowed = _allowed(kind)
     if doc:

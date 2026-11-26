@@ -76,6 +76,13 @@ def main():
             data.pop('_about', None)
         (out / 'content' / rel).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
         written.append(out / 'content' / rel)
+    # Translated guide words (content/topics-i18n/<lang>/<id>.json): strings only, no readings, so nothing to clean.
+    for src in sorted((ROOT / 'content' / 'topics-i18n').glob('*/*.json')):
+        rel = src.relative_to(ROOT / 'content')
+        (out / 'content' / rel).parent.mkdir(parents=True, exist_ok=True)
+        data = json.loads(src.read_text(encoding='utf-8'))
+        (out / 'content' / rel).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+        written.append(out / 'content' / rel)
     bad = [str(EDITS['text'].keys() - used)] if EDITS['text'].keys() - used else []    # an edit that matched nothing: the guide changed, so look again
     for p in written:
         m = LEFT.search(p.read_text(encoding='utf-8', errors='replace'))

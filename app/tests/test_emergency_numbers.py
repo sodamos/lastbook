@@ -31,7 +31,7 @@ SOURCE = re.compile(r'^https?://[^\s/]+\.[^\s/]+\S*$')
 # The last day a number in content/emergency/ may be dated. The real files are checked against this day, not against the
 # computer's clock, so the result is the same on every machine and every day, even where the clock or the time zone is
 # off. Whoever adds or re-checks a number sets it to that day, in the same change. A row dated after it fails.
-REFERENCE_DATE = date(2026, 11, 24)
+REFERENCE_DATE = date(2026, 11, 25)
 
 
 def latest_checked_date(now=None):

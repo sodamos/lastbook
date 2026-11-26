@@ -8,7 +8,7 @@
 
   const english = window.lastbookI18nEnglish;
   // The languages a person can choose, besides English. Each needs its catalogue, an <option> in setup.html and app/ui_language.py.
-  const LOCALES = ['es-419', 'zh-Hans', 'de'];
+  const LOCALES = ['es-419', 'zh-Hans', 'de', 'nl'];
   const LANGUAGES = ['en', ...LOCALES];
   const fallbacks = { 'es-AR': ['es-419'], 'es-CL': ['es-419'], 'es-UY': ['es-419'] };
   let engine;
@@ -29,7 +29,8 @@
   let readGeneration = 0;
 
   const apply = (scope = document, paramsFor) => applyI18n(scope, engine, paramsFor);
-  window.LastbookI18n = Object.freeze({ apply });
+  // language(): the interface language in use now ('en' until a saved choice is applied), for content with its own translations.
+  window.LastbookI18n = Object.freeze({ apply, language: () => selection });
 
   // The file behind the bridge is the truth. Its last answer is also kept in this window's own storage, only so the
   // next page can start in the right language instead of flashing English until the bridge replies.

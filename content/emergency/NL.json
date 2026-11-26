@@ -1,0 +1,153 @@
+{
+  "country": "Netherlands",
+  "code": "NL",
+  "calling_code": "+31",
+  "languages": [
+    "nl"
+  ],
+  "general": "112",
+  "services": [
+    {
+      "kind": "general",
+      "name": "Alarmnummer 112",
+      "number": "112",
+      "how": [
+        "call",
+        "sms",
+        "app"
+      ],
+      "works_from": [
+        "mobile",
+        "landline"
+      ],
+      "works_from_source": "https://www.rijksoverheid.nl/vraag-en-antwoord/alarmnummer-112/112-bellen-in-buitenland",
+      "free": true,
+      "free_source": "https://www.rijksoverheid.nl/vraag-en-antwoord/alarmnummer-112/112-bellen-in-buitenland",
+      "keywords": {
+        "nl": [
+          "alarmnummer",
+          "noodnummer",
+          "noodgeval",
+          "spoed",
+          "ambulance",
+          "brandweer",
+          "politie"
+        ],
+        "en": [
+          "emergency",
+          "ambulance",
+          "fire",
+          "police"
+        ]
+      },
+      "when": "Only when every second counts. The national 112 centre asks what is happening and where, and connects the caller to the police, fire service or ambulance in their region. It can be called from a mobile phone without credit or without a (valid) SIM card. Deaf, hard-of-hearing and speech-impaired people can use the Tolkcontact app or the 112NL app, or text 112 after registering once for e-sms by texting 'aanmelden' to 112.",
+      "source": [
+        "https://www.rijksoverheid.nl/themas/recht-veiligheid-en-defensie/huiselijk-geweld/vraag-en-antwoord/alarmnummer-112/wat-gebeurt-er-als-ik-alarmnummer-112-bel",
+        "https://www.rijksoverheid.nl/vraag-en-antwoord/alarmnummer-112/112-bellen-doven-slechthorenden",
+        "https://www.politie.nl/contact"
+      ],
+      "url": "https://www.rijksoverheid.nl/onderwerpen/alarmnummer-112",
+      "area_whole_country": true,
+      "checked_on": "2026-11-25",
+      "verified": "official"
+    },
+    {
+      "kind": "police",
+      "name": "Politie (geen spoed)",
+      "number": "0900 8844",
+      "how": [
+        "call"
+      ],
+      "works_from": [],
+      "free": false,
+      "free_source": "https://www.politie.nl/contact",
+      "keywords": {
+        "nl": [
+          "politie",
+          "geen spoed",
+          "aangifte",
+          "melding"
+        ],
+        "en": [
+          "police",
+          "non-emergency"
+        ]
+      },
+      "when": "The police when it is not an emergency. The call costs 2 cents a minute plus the caller's usual call charges. In an emergency, call 112.",
+      "source": "https://www.politie.nl/contact",
+      "url": "https://www.politie.nl/contact",
+      "checked_on": "2026-11-25",
+      "verified": "official"
+    },
+    {
+      "kind": "crisis",
+      "name": "113 Zelfmoordpreventie",
+      "number": "113",
+      "how": [
+        "call",
+        "chat"
+      ],
+      "works_from": [],
+      "free": true,
+      "free_source": "https://www.rijksoverheid.nl/contact/contactgids/stichting-113-zelfmoordpreventie",
+      "keywords": {
+        "nl": [
+          "zelfmoord",
+          "zelfdoding",
+          "suïcide",
+          "hulplijn",
+          "crisis"
+        ],
+        "en": [
+          "suicide",
+          "crisis",
+          "helpline"
+        ]
+      },
+      "when": "For people with thoughts of suicide and for the people close to them. Anonymous, 24 hours a day, 7 days a week, by phone or by chat at 113.nl.",
+      "source": [
+        "https://www.rijksoverheid.nl/contact/contactgids/stichting-113-zelfmoordpreventie",
+        "https://www.113.nl/"
+      ],
+      "url": "https://www.113.nl/",
+      "checked_on": "2026-11-25",
+      "verified": "official"
+    },
+    {
+      "kind": "other",
+      "name": "Nationaal Storingsnummer Gas en Stroom",
+      "number": "0800 9009",
+      "how": [
+        "call"
+      ],
+      "works_from": [],
+      "free": true,
+      "free_source": "https://www.liander.nl/grootzakelijk/graafschade-voorkomen/herstel-graafschade",
+      "keywords": {
+        "nl": [
+          "stroomstoring",
+          "stroomuitval",
+          "gasstoring",
+          "gaslucht",
+          "gaslek",
+          "storing",
+          "netbeheerder"
+        ],
+        "en": [
+          "power cut",
+          "power outage",
+          "gas leak",
+          "gas smell"
+        ]
+      },
+      "when": "To report a power cut, a gas outage or a smell of gas to the grid operator (netbeheerder) for the area. Stedin's page, for a smell of gas: close the main gas tap at the meter, ventilate the house, then call this number.",
+      "source": [
+        "https://web.stedin.net/storingen",
+        "https://www.liander.nl/grootzakelijk/graafschade-voorkomen/herstel-graafschade"
+      ],
+      "url": "https://web.stedin.net/storingen",
+      "checked_on": "2026-11-25",
+      "verified": "official"
+    }
+  ]
+}

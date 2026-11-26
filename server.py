@@ -35,7 +35,7 @@ if __name__ == '__main__':  # --data must be known before the paths below are wo
 
 import engine.paths as lastbook_paths  # noqa: E402  (data folder and program folder can differ in the packaged app)
 from engine.paths import ro_uri  # noqa: E402
-from engine import saved_pages, address_search, encyclopedias  # noqa: E402
+from engine import saved_pages, address_search, encyclopedias, dutch_query  # noqa: E402
 from engine.setup import api as setup_api  # noqa: E402  (the one module that may download: only when the person asks)
 HERE = lastbook_paths.DATA  # holds derived/
 APP = lastbook_paths.APP  # holds web/ and content/
@@ -201,6 +201,52 @@ def topics():
     return out
 
 
+# Translated guide text: content/topics-i18n/<lang>/<topic id>.json (format: content/topics-i18n/README.md).
+# A translation maps English strings to translated ones, so an English string that changes falls back to English
+# instead of showing a translation of something else.
+TOPIC_LANG = re.compile(r'[a-z]{2,3}(-[A-Za-z0-9]{2,8})?')
+
+
+def topic_translations(lang):
+    """{topic id: translation} for an interface language, or {} for English and for a language with none."""
+    if not lang or lang == 'en' or not TOPIC_LANG.fullmatch(lang):
+        return {}
+    folder = APP / 'content' / 'topics-i18n' / lang
+    out = {}
+    for f in sorted(folder.glob('*.json')) if folder.is_dir() else []:
+        try:
+            data = json.loads(f.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue        # a broken translation leaves that guide in English
+        if isinstance(data, dict) and isinstance(data.get('text', {}), dict):
+            out[f.stem] = data
+    return out
+
+
+def translate_topic(t, tr, lang):
+    """A copy of topic t with its own words (title, intro, choices, limits, route) translated where tr has them.
+    Readings, page numbers and sources are not touched; keywords gain the translation's own."""
+    text = tr.get('text', {})
+
+    def words(d, *keys):
+        d = dict(d)
+        for k in keys:
+            if isinstance(d.get(k), str) and isinstance(text.get(d[k]), str):
+                d[k] = text[d[k]]
+        return d
+    t = words(t, 'title', 'short', 'intro')
+    for k, fields in (('choices', ('label', 'hint')), ('limits', ('text',)), ('route', ('title', 'goal'))):
+        if isinstance(t.get(k), list):
+            t[k] = [words(x, *fields) if isinstance(x, dict) else x for x in t[k]]
+    extra = [w for w in tr.get('keywords', []) if isinstance(w, str)]
+    if extra:
+        t['keywords'] = list(t.get('keywords', [])) + [w for w in extra if w not in t.get('keywords', [])]
+    if isinstance(tr.get('tile'), str):
+        t['tile'] = tr['tile']
+    t['lang'] = lang
+    return t
+
+
 def zim_names():
     """The encyclopedia files this library really holds. Its folder decides, so one rule covers every size of pack.
     Only files the /zim/ reader would open (engine/safe_paths.py): a link out of collections/ is not offered or cited."""
@@ -225,8 +271,9 @@ def resolve_item(i):
     return i
 
 
-def topics_resolved():
+def topics_resolved(lang=None):
     res = []
+    translations = topic_translations(lang)
     try:
         gaps = json.loads((APP / 'content' / 'gaps.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -240,7 +287,7 @@ def topics_resolved():
         return step.get('goto') or step['read'] or not step['had']
 
     for t in topics():
-        t = dict(t)
+        t = translate_topic(t, translations[t['id']], lang) if t.get('id') in translations else dict(t)
         t['gaps'] = gaps.get(t['id'], {})
         for k in ('prepare', 'learn'):
             t[k] = here(t.get(k, []))
@@ -355,10 +402,13 @@ def search_ids(keep):
 
 
 @functools.lru_cache(maxsize=256)
-def find(q, kind='all', limit=30):
+def find(q, kind='all', limit=30, lang=None):
+    asked = q
+    q, dutch = dutch_query.to_english(q, lang)     # the manuals are English: a Dutch search is looked up in English words
+    english = q if dutch else None
     content, groups = query_groups(q)
     if not groups:
-        return {'q': q, 'results': [], 'expanded': []}
+        return {'q': asked, 'english': english, 'results': [], 'expanded': []}
     allowed = KIND_FILTERS.get(kind)
     # Videos are a small share of the index, so a broad word fills the LIMIT with manual pages and the filter below
     # leaves nothing: count only video rows in the query itself. Manual pages are most of the index and need no help,
@@ -424,7 +474,7 @@ def find(q, kind='all', limit=30):
         p['hits'] = [{'page': h['page'], 'snippet': clean_snip(h['snippet'])} for h in d['hits']]
         results.append(p)
     expanded = sorted(set(w for g in groups for w in g[1:]) - set(content))
-    return {'q': q, 'mode': mode, 'expanded': expanded, 'results': results}
+    return {'q': asked, 'english': english, 'mode': mode, 'expanded': expanded, 'results': results}
 
 
 def clean_snip(s):
@@ -2013,9 +2063,9 @@ class Handler(library.Handler):
             if path == '/sw.js':
                 return self.send_static(WEB / 'sw.js')
             if path == '/api/topics':
-                return self.send_json(topics_resolved())
+                return self.send_json(topics_resolved(qs.get('lang')))
             if path == '/api/find':
-                return self.send_json(find(qs.get('q', '')[:200], qs.get('kind', 'all')))
+                return self.send_json(find(qs.get('q', '')[:200], qs.get('kind', 'all'), lang=qs.get('lang')))
             if path.startswith('/api/doc/'):
                 r = catalog()['by_id'].get(path[9:])
                 return self.send_json(public(r, full=True) if r else {'error': 'This item is not in the library catalog.'}, 200 if r else 404)
@@ -2042,7 +2092,7 @@ class Handler(library.Handler):
                 t = transcript(path[16:])
                 return self.send_json(t if t is not None else {'error': 'unknown video'}, 200 if t is not None else 404)
             if path == '/api/retrieve':
-                return self.send_json({'q': qs.get('q', ''), 'results': assistant.hybrid(qs.get('q', '')[:200], min(20, int(qs.get('k', 8))), qs.get('kind', 'any')),
+                return self.send_json({'q': qs.get('q', ''), 'results': assistant.hybrid(dutch_query.to_english(qs.get('q', '')[:200], qs.get('lang'))[0], min(20, int(qs.get('k', 8))), qs.get('kind', 'any')),
                                        'semantic': INDEX.status if INDEX else None})
             if path == '/api/assistant/status':
                 return self.send_json(dict(assistant.model_status(), coverage=coverage()))

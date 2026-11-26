@@ -342,8 +342,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     _repo=Path(__file__).resolve().parents[1]
     if str(_repo) not in sys.path:
      sys.path.insert(0,str(_repo))
-    from engine import encyclopedias
+    from engine import encyclopedias, dutch_query
     params=urllib.parse.parse_qs(url.query);q=params.get('q',[''])[0]
+    q=dutch_query.to_english(q,params.get('lang',[None])[0])[0]   # the encyclopedias are English: a Dutch search uses English words
     # Same JSON as before: title, collection, path. Text excerpts stay inside Chat, not this UI search.
     # root=ROOT: this process may have been started with LASTBOOK_LIBRARY, which is
     # the library-data folder itself. encyclopedias.search defaults to engine.paths.LIB.

@@ -1,0 +1,29 @@
+{
+  "id": "comms",
+  "tile": "Contact en de weg vinden",
+  "keywords": ["communicatie", "contact", "familie bereiken", "telefoon werkt niet", "geen bereik", "internet ligt eruit", "noodradio", "radio", "calamiteitenzender", "nl-alert", "waarschuwing", "zendamateur", "portofoon", "walkietalkie", "pmr", "27mc", "kaart", "kompas", "navigeren", "verdwaald", "signaleren", "fluitje", "gered worden"],
+  "text": {
+    "Communicate & find your way": "Contact houden en de weg vinden",
+    "Family contact, emergency radio, ham radio, map and compass": "Contact met familie, noodradio, zendamateurs, kaart en kompas",
+    "Ways to reach family and get official warnings when phones and internet are down or overloaded, what you need to know before using two-way radios, and how to find your way with a map and compass or signal for help.": "Manieren om familie te bereiken en officiële waarschuwingen te krijgen als telefoon en internet niet werken of overbelast zijn, wat je moet weten voordat je portofoons gebruikt, en hoe je de weg vindt met kaart en kompas of om hulp seint.",
+    "Phones or internet are down or overloaded": "Telefoon of internet werkt niet of is overbelast",
+    "Calls won't connect, need to find family": "Bellen lukt niet, familie moet bereikt worden",
+    "I need official warnings and news": "Ik heb officiële waarschuwingen en nieuws nodig",
+    "NOAA Weather Radio, emergency alerts, battery or crank radio": "Weerradio, noodwaarschuwingen (zoals NL-Alert), radio op batterijen of met slinger",
+    "Ham (amateur) radio — can I use it?": "Zendamateur (amateurradio) — mag ik dat gebruiken?",
+    "Licensing, ARES, getting started": "Machtiging, noodnetwerken van zendamateurs, beginnen",
+    "Talking with neighbors without phones": "Praten met de buren zonder telefoon",
+    "FRS/GMRS walkie-talkies, CB, neighborhood radio plans": "Walkietalkies (FRS/GMRS in de VS, PMR446 in Europa), 27 MHz (CB), radioplan voor de buurt",
+    "Find my way with a map and compass": "De weg vinden met kaart en kompas",
+    "No GPS or phone, reading a topo map, taking a bearing": "Geen gps of telefoon, een topografische kaart lezen, een koers bepalen",
+    "Signal for help or rescue": "Seinen om hulp of redding",
+    "Trapped, lost, need to be seen or heard": "Ingesloten, verdwaald, je moet gezien of gehoord worden",
+    "Ham radio operators must pass a test and obtain an FCC license (Technician, General or Extra).": "Zendamateurs moeten een examen halen en een vergunning van de FCC krijgen (Technician, General of Extra) — dat is de regel in de VS; in Nederland regelt de RDI de machtiging.",
+    "You need an FCC license to communicate on ham radio (the article says the test can be prepared for in days).": "Je hebt een FCC-vergunning nodig om als zendamateur uit te zenden (regel in de VS; het artikel zegt dat je je in een paar dagen op het examen kunt voorbereiden).",
+    "FRS radios may be used without a license, but transmitting on GMRS radios requires a license.": "FRS-portofoons mag je zonder vergunning gebruiken, maar voor zenden op GMRS heb je een vergunning nodig (regels in de VS).",
+    "FCC rules allow an amateur station in distress to use any means at its disposal to attract attention and get help (the rule as printed in the ARES manual).": "Volgens de regels van de FCC mag een zendamateur in nood elk middel gebruiken om de aandacht te trekken en hulp te krijgen (de regel zoals die in het ARES-handboek staat; VS).",
+    "NOAA Weather Radio usually reaches about 40 miles; buildings and valleys can block it, so test a receiver where you will use it.": "NOAA Weather Radio (VS) reikt meestal zo’n 65 kilometer (40 mijl); gebouwen en dalen kunnen het signaal tegenhouden, dus test een ontvanger op de plek waar je hem gaat gebruiken.",
+    "A compass points to magnetic north, not true north; the difference varies by place and changes over time.": "Een kompas wijst naar het magnetische noorden, niet naar het ware noorden; het verschil hangt af van de plek en verandert in de loop van de tijd.",
+    "If trapped, shout only as a last resort — it can make you inhale dangerous dust; tap on a pipe or wall or use a whistle.": "Zit je ingesloten, schreeuw dan alleen als laatste redmiddel — je kunt dan gevaarlijk stof inademen; tik op een buis of muur of gebruik een fluitje."
+  }
+}

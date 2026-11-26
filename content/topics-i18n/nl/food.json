@@ -1,0 +1,29 @@
+{
+  "id": "food",
+  "tile": "Eten en koken",
+  "keywords": ["eten", "voedsel", "koelkast", "vriezer", "diepvries", "ontdooid", "bedorven", "weggooien", "houdbaar", "blik", "conserven", "koken zonder stroom", "kampeerbrander", "gasstel", "barbecue", "noodvoorraad", "voorraad", "rantsoen", "babyvoeding", "flesvoeding", "dieet", "huisdier"],
+  "text": {
+    "Keep food safe and cook without power": "Eten veilig houden en koken zonder stroom",
+    "Fridge and freezer in an outage, safe cooking, emergency food": "Koelkast en vriezer bij stroomuitval, veilig koken, noodvoorraad",
+    "Readings for when the power or gas is out: how long fridge and freezer food stays safe, what to throw away, how to cook without burning or poisoning anyone, and how to make stored food last.": "Leesstof voor als de stroom of het gas uitvalt: hoelang eten in koelkast en vriezer veilig blijft, wat je weggooit, hoe je kookt zonder dat iemand zich brandt of vergiftigd raakt, en hoe je langer doet met je voorraad.",
+    "The power is out: fridge and freezer": "De stroom is uit: koelkast en vriezer",
+    "Is the food still safe? How long will it last?": "Is het eten nog veilig? Hoelang blijft het goed?",
+    "Deciding what to throw out": "Beslissen wat weg moet",
+    "Warm meat, defrosted, whether to refreeze, swollen or dented cans, odd smell": "Warm geworden vlees, ontdooid, opnieuw invriezen of niet, bolle of gedeukte blikken, rare geur",
+    "Food got wet in a flood": "Eten is nat geworden bij een overstroming",
+    "Pantry, cans or garden touched flood water": "Voorraadkast, blikken of moestuin in aanraking met overstromingswater",
+    "Cooking without power or gas": "Koken zonder stroom of gas",
+    "Camp stove, grill, fireplace, no cooker or hob, canned or tinned food": "Kampeerbrander, barbecue, open haard, zonder fornuis of kookplaat, eten uit blik",
+    "Food is running low": "Het eten raakt op",
+    "Making stores last, staying strong": "Geen eten meer, langer doen met de voorraad, op krachten blijven",
+    "Feeding babies or people with special diets": "Eten voor baby’s of mensen met een speciaal dieet",
+    "Formula, elderly, illness, allergies, pets": "Flesvoeding, ouderen, ziekte, allergieën, huisdieren",
+    "Throw away refrigerated food that has been at 40 °F or higher for more than 4 hours, or that has an unusual odor, color or texture.": "Gooi gekoeld eten weg dat langer dan 4 uur op 4 °C (40 °F) of warmer is geweest, of dat een vreemde geur, kleur of structuur heeft.",
+    "Discard perishable food that has been above 40 °F for 2 hours or more; you cannot rely on appearance or odor.": "Gooi bederfelijk eten weg dat 2 uur of langer boven 4 °C (40 °F) is geweest; op uiterlijk of geur kun je niet afgaan.",
+    "Use generators, camp stoves and charcoal grills only outdoors, at least 20 feet from windows, doors or garages; never heat a home with a gas stove, oven, grill or dryer.": "Gebruik aggregaten, kampeerbranders en houtskoolbarbecues alleen buiten, minstens 6 meter (20 voet) van ramen, deuren of garages; verwarm een huis nooit met een gasfornuis, oven, barbecue of droger.",
+    "Replace refrigerated medicines if the power is out a day or more unless the label says otherwise; call a doctor or pharmacist if you depend on them.": "Vervang medicijnen die koel moeten blijven als de stroom een dag of langer uit is, tenzij op de verpakking iets anders staat; bel een arts of apotheker als je ervan afhankelijk bent.",
+    "Do not eat any food that may have touched flood water unless it is in a waterproof container that can be cleaned.": "Eet niets dat met overstromingswater in aanraking kan zijn geweest, tenzij het in een waterdichte verpakking zit die je kunt schoonmaken.",
+    "Food can be rationed safely for healthy adults, but not for children and pregnant women; water should not be rationed.": "Voor gezonde volwassenen kun je eten veilig rantsoeneren, maar niet voor kinderen en zwangere vrouwen; water moet je niet rantsoeneren.",
+    "CDC advice is to discard any home-canned food that might contain botulism toxin.": "Het advies van de CDC (de Amerikaanse gezondheidsdienst) is om zelf ingemaakt eten weg te gooien als er botulismegif in kan zitten."
+  }
+}

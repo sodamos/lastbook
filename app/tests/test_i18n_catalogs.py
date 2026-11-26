@@ -118,7 +118,7 @@ class FallbackWording(unittest.TestCase):
         en = json.loads((ROOT / 'translations' / 'desktop' / 'en.json').read_text(encoding='utf-8'))
         text = en['language.unavailable']
         self.assertEqual(text, 'The saved language is unavailable. Lastbook is using English.')
-        for name in ('Spanish', 'German', 'Chinese', 'español', 'Deutsch', '中文'):
+        for name in ('Spanish', 'German', 'Chinese', 'Dutch', 'español', 'Deutsch', '中文', 'Nederlands'):
             self.assertNotIn(name, text)
 
 
@@ -185,6 +185,44 @@ class GermanWording(unittest.TestCase):
     def test_no_message_is_left_in_english(self):
         same = {key for key in self.de if self.de[key] == self.en[key]}
         self.assertLessEqual(same, {'nav.chat', 'nav.videos', 'nav.video', 'search.filter'})
+
+
+class DutchWording(unittest.TestCase):
+    """The nl catalogue keeps the conventions in docs/i18n.md#dutch-nl: informal "je" throughout, and different words for
+    Setup (inrichten) and Settings (Instellingen), which "instellen" and "Instellingen" would not give."""
+
+    @classmethod
+    def setUpClass(cls):
+        load = lambda name: json.loads((ROOT / 'translations' / 'desktop' / name).read_text(encoding='utf-8'))
+        cls.en, cls.nl = load('en.json'), load('nl.json')
+        # Plural messages are objects; every form counts.
+        cls.texts = [x for v in cls.nl.values() for x in (v.values() if isinstance(v, dict) else [v])]
+
+    def test_informal_address_only(self):
+        import re
+        everything = ' '.join(self.texts)
+        formal = re.findall(r'\b(u|uw|uzelf)\b', everything, flags=re.IGNORECASE)
+        self.assertEqual(formal, [])
+
+    def test_setup_and_settings_are_different_words(self):
+        self.assertEqual(self.nl['setup.title'], 'Lastbook inrichten')
+        self.assertEqual(self.nl['nav.settings'], 'Instellingen')
+        everything = ' '.join(self.texts).lower()
+        self.assertNotIn('instellen', everything)        # one letter from "instellingen": the screens would blur
+        self.assertIn('Inrichten en Instellingen', self.nl['language.preview'])
+
+    def test_everyday_words_and_formatting(self):
+        self.assertIn('deze computer', self.nl['setup.loading'].lower())
+        self.assertIn('regio', self.nl['setup.chooseIntro'])           # not "staat" or "provincie": any region
+        self.assertIn('zonder internet', self.nl['setup.chooseIntro'])
+        everything = ' '.join(self.texts)
+        self.assertNotIn(' …', everything)                               # no space before an ellipsis in Dutch
+        self.assertNotIn("Video's", everything)                          # the typographic apostrophe, as in English
+        self.assertEqual(self.nl['language.unavailable'], 'De opgeslagen taal is niet beschikbaar. Lastbook gebruikt Engels.')
+
+    def test_no_message_is_left_in_english(self):
+        same = {key for key in self.nl if self.nl[key] == self.en[key]}
+        self.assertLessEqual(same, {'nav.chat', 'nav.video', 'search.filter'})
 
 
 class SpanishWording(unittest.TestCase):

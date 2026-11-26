@@ -10,7 +10,7 @@ from pathlib import Path
 
 FILENAME = 'ui-language.json'
 ROUTE = '/api/ui-language'
-LANGUAGES = ('en', 'es-419', 'zh-Hans', 'de')
+LANGUAGES = ('en', 'es-419', 'zh-Hans', 'de', 'nl')
 MAX_BYTES = 128
 # Windows refuses to replace a file another process has open for a moment (a
 # window reading it, a virus scanner). Wait a little and try again.

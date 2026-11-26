@@ -62,5 +62,23 @@
   "language.saved": "Language saved.",
   "language.saveFailed": "Could not save the language. Try again.",
   "language.loadFailed": "Could not load the saved language.",
-  "language.unavailable": "The saved language is unavailable. Lastbook is using English."
+  "language.unavailable": "The saved language is unavailable. Lastbook is using English.",
+  "home.title": "What do you need?",
+  "home.lead": "Pick what’s happening, search in your own words, or ask the library a question.",
+  "guide.needHelpNow": "Need help now",
+  "guide.learnSkill": "Learn a skill",
+  "guide.whatsHappening": "What’s happening?",
+  "guide.whereStart": "Where do you want to start?",
+  "guide.stopAndGetHelp": "Stop and get help when…",
+  "guide.showAllWarnings": {
+    "other": "Show all {count} warnings"
+  },
+  "guide.route": "Your learning route",
+  "guide.getReady": "Get ready before it happens",
+  "guide.goDeeper": "Go deeper: full manuals & articles",
+  "guide.related": "Related guides",
+  "guide.notInLibrary": "Not in this library",
+  "search.startWithGuide": "Start with a guide",
+  "search.guideNote": "Picked pages with exact page numbers and safety limits",
+  "search.inEnglish": "Searched the English manuals for “{query}”"
 }

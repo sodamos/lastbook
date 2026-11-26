@@ -1,0 +1,31 @@
+{
+  "id": "sanitation",
+  "tile": "Wc en hygiëne",
+  "keywords": ["wc", "toilet", "doortrekken", "noodtoilet", "emmer", "riool", "rioolwater", "verstopt", "handen wassen", "zeep", "desinfecteren", "afval", "vuilnis", "vuilniszak", "ratten", "vliegen", "diarree", "buikgriep", "besmetting", "ondergelopen"],
+  "text": {
+    "Toilets, waste and hygiene when plumbing fails": "Wc, afval en hygiëne als het riool niet werkt",
+    "Emergency toilets, handwashing, garbage, diarrhea": "Noodtoiletten, handen wassen, afval, diarree",
+    "Readings for when toilets cannot be flushed or sewer lines may be broken: emergency toilets, keeping hands clean with little water, handling garbage, and stopping diarrhea from spreading. It also shows the warning signs that mean someone needs medical help.": "Leesstof voor als je de wc niet kunt doortrekken of het riool misschien kapot is: noodtoiletten, handen schoon houden met weinig water, omgaan met afval en voorkomen dat diarree zich verspreidt. Ook de alarmsignalen die betekenen dat iemand medische hulp nodig heeft.",
+    "The toilet can't be flushed": "De wc kan niet worden doorgetrokken",
+    "No water, earthquake, broken sewer line, loo won't flush": "Geen water, aardbeving, kapot riool, toilet werkt niet of trekt niet door",
+    "We need an outdoor toilet for days or weeks": "We hebben dagen of weken een toilet buiten nodig",
+    "Yard or open ground available": "Er is een tuin of open terrein",
+    "Keep hands clean with little water": "Handen schoon houden met weinig water",
+    "No running water, soap or sanitizer": "Geen stromend water, zeep of handgel",
+    "Garbage is piling up": "Het afval stapelt zich op",
+    "No trash or rubbish pickup, food waste, flies and rats": "Vuilnis wordt niet opgehaald, etensresten, vliegen en ratten",
+    "Someone has diarrhea or vomiting": "Iemand heeft diarree of moet overgeven",
+    "Adult, child or baby": "Volwassene, kind of baby",
+    "Stop illness spreading in the household": "Voorkomen dat ziekte zich in huis verspreidt",
+    "Cholera, stomach bugs, caring for a sick person": "Cholera, buikgriep, zorgen voor een zieke",
+    "Sewage or flood water got into the house": "Rioolwater of overstromingswater in huis",
+    "Backed-up drains, flooded rooms, mud": "Teruggelopen afvoeren, ondergelopen kamers, modder",
+    "A lot of watery diarrhea in a short time, diarrhea with blood and mucus, or diarrhea lasting weeks are danger signs.": "Veel waterdunne diarree in korte tijd, diarree met bloed en slijm, of diarree die weken duurt, zijn alarmsignalen.",
+    "In a cholera outbreak, get people who need it to medical help, such as a field clinic that can give IV fluids.": "Breng mensen bij een cholera-uitbraak naar medische hulp als ze die nodig hebben, bijvoorbeeld een veldkliniek die vocht via een infuus kan geven.",
+    "Dehydration in a child can become serious quickly; if the child does not start to improve quickly with fluids, get help.": "Uitdroging bij een kind kan snel ernstig worden; gaat het kind niet snel vooruit met drinken, haal dan hulp.",
+    "If sewer lines are damaged, stop putting toilet, kitchen, shower and bath water into drains until repaired.": "Is het riool beschadigd, laat dan geen water van wc, keuken, douche of bad meer weglopen tot het gerepareerd is.",
+    "Burning plastic or rubber releases toxic chemicals; buried trash with chemicals can contaminate drinking water.": "Bij het verbranden van plastic of rubber komen giftige stoffen vrij; begraven afval met chemicaliën kan drinkwater vervuilen.",
+    "Keep medical waste such as soiled gloves and dressings bagged, marked, and separate from other trash.": "Houd medisch afval, zoals vuile handschoenen en verband, in een zak, met een opschrift, en apart van ander afval.",
+    "Do not build pit toilets on ground that floods, and keep toilets well away from wells, rivers and springs.": "Graaf geen latrine op grond die onder kan lopen, en houd toiletten ver weg van putten, rivieren en bronnen."
+  }
+}
