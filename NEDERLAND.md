@@ -44,6 +44,16 @@ Provincies: GR, FR, DR, OV, FL, GE, UT, NH, ZH, ZE, NB, LI, of `--province all` 
 keer per gebied opgehaald en gedeeld tussen buurprovincies (`derived/regions/NL-shared/`); voor heel Nederland zijn dat
 miljoenen adressen, dus reken op een flinke downloadtijd en een paar GB. Een provincie die faalt houdt de rest niet tegen.
 
+Heel Nederland in één kaart, uit de provincies die al gebouwd zijn (niets wordt opnieuw gedownload; een paar minuten,
+ongeveer 3,5 GB extra voor de kaart, de adressen worden gelinkt en niet gekopieerd):
+
+```sh
+python3 tools/build_region_nl.py merge --province all        # of een paar: --province FR,GR,DR
+LASTBOOK_MAP="$PWD/derived/regions/NL/data/derived/geo" .venv/bin/python app/main.py
+```
+
+Bouw je een provincie opnieuw, draai `merge` daarna ook opnieuw.
+
 Waddeneilanden: Texel zit in `NL-NH`; Vlieland, Terschelling, Ameland en Schiermonnikoog in `NL-FR`. De controle eist
 per eiland straten, adressen, de gemeente in de plaatszoeker en een voorbeeldadres; anders faalt de bouw.
 

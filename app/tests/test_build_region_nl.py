@@ -462,5 +462,79 @@ class MapBesideTheLibrary(unittest.TestCase):
             self.assertEqual(server.geo_dir(), server.HERE / 'derived' / 'geo')
 
 
+class MergeTheCountry(unittest.TestCase):
+    """merge: the provinces already built as one map of the whole country, without downloading anything."""
+
+    def province(self, root, code, pois, places, box):
+        geo = root / 'derived' / 'regions' / f'NL-{code}' / 'data' / 'derived' / 'geo'
+        (geo / 'addresses').mkdir(parents=True)
+        db = sqlite3.connect(geo / 'national.sqlite')
+        db.executescript('CREATE TABLE feat(id INTEGER PRIMARY KEY, layer TEXT, cls TEXT, name TEXT, minz INTEGER, geom BLOB);'
+                         'CREATE VIRTUAL TABLE feat_idx USING rtree(id, minx, maxx, miny, maxy, minz, maxz);'
+                         'CREATE TABLE poi(id INTEGER PRIMARY KEY, cls TEXT, name TEXT, lon REAL, lat REAL);'
+                         'CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);'
+                         'CREATE INDEX poi_cls ON poi(cls, lon, lat);')
+        for i in (1, 2):
+            db.execute('INSERT INTO feat VALUES (?, ?, ?, ?, ?, ?)', (i, 'road', 'primary', f'{code} weg {i}', 8, b'x'))
+            db.execute('INSERT INTO feat_idx VALUES (?, ?, ?, ?, ?, ?, ?)', (i, box[0], box[2], box[1], box[3], 8, 20))
+        db.executemany('INSERT INTO poi(cls, name, lon, lat) VALUES (?, ?, ?, ?)', pois)
+        db.executemany('INSERT INTO meta VALUES (?, ?)', [('region', f'NL-{code}'), ('bounds', ','.join(map(str, box))),
+                                                           ('data_as_of', '2026-11-24T21:21:23Z')])
+        db.commit()
+        db.close()
+        m = sqlite3.connect(geo / 'map.sqlite')
+        m.execute('CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)')
+        m.execute('INSERT INTO meta VALUES (?, ?)', ('region', f'NL-{code}'))
+        m.commit()
+        m.close()
+        p = sqlite3.connect(geo / 'places.sqlite')
+        p.executescript('CREATE TABLE place(id INTEGER PRIMARY KEY, name TEXT, kind TEXT, detail TEXT, lat REAL, lon REAL, rank INTEGER, source TEXT);'
+                        "CREATE VIRTUAL TABLE place_fts USING fts5(name, detail, content='place', content_rowid='id', tokenize='unicode61');")
+        p.executemany('INSERT INTO place(name, kind, detail, lat, lon, rank, source) VALUES (?, ?, ?, ?, ?, ?, ?)', places)
+        p.execute("INSERT INTO place_fts(place_fts) VALUES ('rebuild')")
+        p.commit()
+        p.close()
+        (geo / 'addresses' / f'NL-{code}.sqlite').write_bytes(b'')
+        return geo
+
+    def test_two_provinces_become_one_map(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            border = ('fire_station', 'Brandweer Grens', 5.30, 52.90)          # in both extracts
+            self.province(root, 'FR', [border, ('pharmacy', 'Apotheek Noord', 5.80, 53.20)],
+                          [('Grensdorp', 'place (woonplaats)', 'Fryslân', 52.90, 5.30, 1, 'Kadaster BAG')], (4.8, 52.7, 6.4, 53.6))
+            self.province(root, 'NH', [border, ('police', 'Politie Zuid', 4.90, 52.37)],
+                          [('Grensdorp', 'place (woonplaats)', 'Fryslân', 52.9005, 5.3005, 1, 'Kadaster BAG'),
+                           ('Amsterdam', 'place (woonplaats)', 'Noord-Holland', 52.37, 4.90, 1, 'Kadaster BAG')], (4.4, 52.1, 5.4, 53.2))
+            with mock.patch.object(nl, 'ROOT', root):
+                data = nl.merge(['FR', 'NH', 'ZH'])
+            geo = data / 'derived' / 'geo'
+            db = sqlite3.connect(geo / 'national.sqlite')
+            self.assertEqual(db.execute('SELECT count(*) FROM feat').fetchone()[0], 4)
+            self.assertEqual(db.execute('SELECT count(*) FROM feat_idx').fetchone()[0], 4)
+            self.assertEqual(sorted(n for n, in db.execute('SELECT name FROM poi')), ['Apotheek Noord', 'Brandweer Grens', 'Politie Zuid'])
+            meta = dict(db.execute('SELECT key, value FROM meta').fetchall())
+            db.close()
+            self.assertEqual(meta['region'], 'NL')
+            self.assertEqual(meta['bounds'], '4.4000,52.1000,6.4000,53.6000')
+            p = sqlite3.connect(geo / 'places.sqlite')
+            self.assertEqual(p.execute('SELECT count(*) FROM place').fetchone()[0], 2)          # Grensdorp once
+            self.assertEqual(p.execute("SELECT count(*) FROM place_fts WHERE place_fts MATCH 'amsterdam'").fetchone()[0], 1)
+            p.close()
+            self.assertTrue((geo / 'addresses' / 'NL-FR.sqlite').is_symlink())
+            self.assertEqual(sorted(f.name for f in (geo / 'addresses').iterdir()), ['NL-FR.sqlite', 'NL-NH.sqlite'])
+            report = json.loads((data / 'build.json').read_text(encoding='utf-8'))
+            self.assertEqual(report['not_built'], ['NL-ZH'])
+            self.assertEqual(report['help_points_in_two_provinces'], 1)
+            with mock.patch.object(nl, 'ROOT', root):              # a second merge replaces the first
+                nl.merge(['FR'])
+            self.assertEqual(sorted(f.name for f in (geo / 'addresses').iterdir()), ['NL-FR.sqlite'])
+
+    def test_nothing_built_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(nl, 'ROOT', Path(tmp)):
+            with self.assertRaises(SystemExit):
+                nl.merge(['FR'])
+
+
 if __name__ == '__main__':
     unittest.main()

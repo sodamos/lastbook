@@ -718,7 +718,8 @@ MINIMUM = {'roads': 10000, 'addresses': 100000, 'hospital': 1, 'pharmacy': 10, '
 
 
 def check(data=None):
-    """The data only: nothing here imports engine/ or server.py, so this says nothing about how the app searches it.
+    """The data only: nothing here imports engine/ or server.py. How the app searches it is tested in
+    app/tests/test_address_nl.py.
 
     Returns what failed; build runs it on the new folder before putting it in place."""
     data = data or DATA
@@ -811,7 +812,7 @@ def check(data=None):
     expect(beyond == 0, f'every place-finder row within {NAME} plus the margin ({beyond} beyond)')
     places.close()
     if not failures:
-        print('all checks passed (data only; Dutch address search in the app is not checked here)')
+        print('all checks passed (the data; the app\'s address search has its own tests: app/tests/test_address_nl.py)')
     return failures
 
 
@@ -831,12 +832,125 @@ def demo():
     print(f'python3 server.py --data {folder.relative_to(ROOT)} --no-index')
 
 
+def merge(codes=None, out=None):
+    """One map set for the whole country, derived/regions/NL/data, from the provinces already built: their streets,
+    water, buildings and help points in one map, their place finders in one, and their address indexes beside it
+    (linked, not copied). Nothing is downloaded. A road or a point near a province border is in both extracts: a point
+    or a place is kept once, a line twice (it draws the same). Returns the data folder."""
+    regions = ROOT / 'derived' / 'regions'
+    wanted = list(codes or PROVINCES)
+    built = [(c, regions / f'NL-{c}' / 'data' / 'derived' / 'geo') for c in wanted]
+    built = [(c, g) for c, g in built if (g / 'national.sqlite').is_file() and (g / 'places.sqlite').is_file()]
+    if not built:
+        raise SystemExit('no built province found: build one or more first (build --province ...)')
+    missing = [c for c in wanted if c not in {c for c, _ in built}]
+    if missing:
+        log('not built, so not in the merged map:', ', '.join(missing))
+    base = out or regions / 'NL'
+    data, staging = base / 'data', base / 'data.new'
+    if staging.exists():
+        shutil.rmtree(staging)
+    geo = staging / 'derived' / 'geo'
+    (geo / 'addresses').mkdir(parents=True)
+    started = time.time()
+
+    first = sqlite3.connect(built[0][1] / 'national.sqlite')
+    schema = [sql for name, sql in first.execute('SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL')
+              if not name.startswith('feat_idx_')]                      # the R-tree makes its own shadow tables
+    first.close()
+    db = sqlite3.connect(geo / 'national.sqlite')
+    db.executescript('PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA page_size=8192;')
+    for sql in schema:
+        db.execute(sql)
+    bounds, as_of, kept, twice = [], [], 0, 0
+    for code, g in built:
+        log('merging', f'NL-{code}')
+        db.execute('ATTACH ? AS src', (str(g / 'national.sqlite'),))
+        offset = db.execute('SELECT coalesce(max(id), 0) FROM main.feat').fetchone()[0]
+        db.execute('INSERT INTO main.feat SELECT id + ?, layer, cls, name, minz, geom FROM src.feat', (offset,))
+        db.execute('INSERT INTO main.feat_idx SELECT id + ?, minx, maxx, miny, maxy, minz, maxz FROM src.feat_idx', (offset,))
+        before = db.execute('SELECT count(*) FROM main.poi').fetchone()[0]
+        offered = db.execute('SELECT count(*) FROM src.poi').fetchone()[0]
+        db.execute('INSERT INTO main.poi(cls, name, lon, lat) SELECT s.cls, s.name, s.lon, s.lat FROM src.poi s '
+                   'WHERE NOT EXISTS (SELECT 1 FROM main.poi p WHERE p.cls = s.cls '
+                   'AND p.lon BETWEEN s.lon - 1e-6 AND s.lon + 1e-6 AND p.lat BETWEEN s.lat - 1e-6 AND s.lat + 1e-6 '
+                   "AND coalesce(p.name, '') = coalesce(s.name, ''))")
+        added = db.execute('SELECT count(*) FROM main.poi').fetchone()[0] - before
+        kept, twice = kept + added, twice + offered - added
+        meta = dict(db.execute('SELECT key, value FROM src.meta').fetchall())
+        if meta.get('bounds'):
+            bounds.append([float(v) for v in meta['bounds'].split(',')])
+        if meta.get('data_as_of'):
+            as_of.append(meta['data_as_of'])
+        db.commit()
+        db.execute('DETACH src')
+    box = ','.join(f'{v:.4f}' for v in (min(b[0] for b in bounds), min(b[1] for b in bounds),
+                                        max(b[2] for b in bounds), max(b[3] for b in bounds)))
+    db.executemany('INSERT OR REPLACE INTO meta VALUES (?, ?)', [
+        ('region', 'NL'), ('bounds', box), ('built', time.strftime('%Y-%m-%dT%H:%M:%S')),
+        ('data_as_of', min(as_of) if as_of else ''),
+        ('source', 'OpenStreetMap contributors, via Geofabrik province extracts (ODbL 1.0): '
+                   + ', '.join(f'NL-{c}' for c, _ in built)),
+        ('help_points', 'all classes: OpenStreetMap (ODbL 1.0)')])
+    db.commit()
+    db.close()
+
+    # map.sqlite: the same small file each province has, saying which region this is.
+    shutil.copyfile(built[0][1] / 'map.sqlite', geo / 'map.sqlite')
+    m = sqlite3.connect(geo / 'map.sqlite')
+    m.executemany('INSERT OR REPLACE INTO meta VALUES (?, ?)', [('region', 'NL'), ('bounds', box)])
+    m.commit()
+    m.close()
+    if (built[0][1] / 'socal-cells.json').exists():
+        shutil.copyfile(built[0][1] / 'socal-cells.json', geo / 'socal-cells.json')
+
+    # places.sqlite: every province's places, once (a street or a place on a border is in both).
+    p = sqlite3.connect(geo / 'places.sqlite')
+    p.executescript(
+        'CREATE TABLE place(id INTEGER PRIMARY KEY, name TEXT, kind TEXT, detail TEXT, lat REAL, lon REAL, rank INTEGER, source TEXT);'
+        "CREATE VIRTUAL TABLE place_fts USING fts5(name, detail, content='place', content_rowid='id', tokenize='unicode61');"
+        'CREATE INDEX place_key ON place(name, kind);')
+    for code, g in built:
+        p.execute('ATTACH ? AS src', (str(g / 'places.sqlite'),))
+        p.execute('INSERT INTO place(name, kind, detail, lat, lon, rank, source) '
+                  'SELECT s.name, s.kind, s.detail, s.lat, s.lon, s.rank, s.source FROM src.place s '
+                  'WHERE NOT EXISTS (SELECT 1 FROM main.place q WHERE q.name = s.name AND q.kind = s.kind '
+                  "AND coalesce(q.detail, '') = coalesce(s.detail, '') AND abs(q.lat - s.lat) < 0.002 AND abs(q.lon - s.lon) < 0.002)")
+        p.commit()
+        p.execute('DETACH src')
+    p.execute('DROP INDEX place_key')
+    p.execute("INSERT INTO place_fts(place_fts) VALUES ('rebuild')")
+    p.commit()
+    places = p.execute('SELECT count(*) FROM place').fetchone()[0]
+    p.close()
+
+    # The address indexes stay where they are: a link each, so ten million addresses are not copied.
+    for code, g in built:
+        index = g / 'addresses' / f'NL-{code}.sqlite'
+        if index.exists():
+            (geo / 'addresses' / index.name).symlink_to(index.resolve())
+
+    report = {'region': 'NL', 'merged': [f'NL-{c}' for c, _ in built], 'not_built': [f'NL-{c}' for c in missing],
+              'help_points': kept, 'help_points_in_two_provinces': twice, 'places': places,
+              'seconds': round(time.time() - started)}
+    (staging / 'build.json').write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding='utf-8')
+    if data.exists():
+        shutil.rmtree(data)
+    staging.rename(data)
+    log('whole country:', len(built), 'provinces,', kept, 'help points,', places, 'places, in', report['seconds'], 's ->',
+        data / 'derived' / 'geo')
+    return data
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo'))
+    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge'))
     parser.add_argument('--province', required=True, help='two-letter code (' + ', '.join(PROVINCES) + ') or all')
     parser.add_argument('--refresh', action='store_true', help='fetch: download the OpenStreetMap extract even if recent')
     args = parser.parse_args()
+    if args.step == 'merge':      # the provinces already built, as one map of the whole country
+        merge(None if args.province.lower() == 'all' else [c.strip().upper().removeprefix('NL-') for c in args.province.split(',')])
+        return
     global REFRESH
     REFRESH = args.refresh
     codes = list(PROVINCES) if args.province.lower() == 'all' else [args.province]
