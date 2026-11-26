@@ -443,5 +443,24 @@ class WholeBuild(unittest.TestCase):
         self.assertTrue(any('Heereweg 8' in f for f in failures), failures)
 
 
+class MapBesideTheLibrary(unittest.TestCase):
+    """server.py --map (LASTBOOK_MAP): a province's map is read from its own folder and the library is left as it is."""
+
+    def test_the_map_folder_replaces_the_librarys_own(self):
+        import server
+        with tempfile.TemporaryDirectory() as tmp:
+            geo = Path(tmp) / 'NL-FR' / 'data' / 'derived' / 'geo'
+            with mock.patch.object(server, 'MAP_DIR', str(geo)), \
+                    mock.patch.object(server.address_search, 'find_addresses', return_value=[]) as lookup:
+                self.assertEqual(server.geo_dir(), geo)
+                server.places('18003 nine mile')
+                lookup.assert_called_once_with('18003 nine mile', geo, limit=8, near=None)
+
+    def test_without_it_the_library_holds_the_map(self):
+        import server
+        with mock.patch.object(server, 'MAP_DIR', None):
+            self.assertEqual(server.geo_dir(), server.HERE / 'derived' / 'geo')
+
+
 if __name__ == '__main__':
     unittest.main()

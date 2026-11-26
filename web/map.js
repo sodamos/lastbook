@@ -27,6 +27,7 @@ const MapView = (() => {
     ['police', 'Police', 'P', '#1a4f9c', 'police', 'help'],
     ['shelter', 'Shelters (structures)', '⌂', '#455a64', 'shelter', 'help'],
     ['community', 'Community centers, town halls & libraries', 'C', '#8e24aa', 'community_centre,town_hall,library', 'help'],
+    ['ferry', 'Ferry terminals', 'Fe', '#00838f', 'ferry_terminal', 'help'],   // offered only where a map has them (islands)
     ['water', 'Drinking-water taps', 'W', '#0277bd', 'drinking_water', 'water'],
     ['reservoir', 'Reservoirs & named lakes', '≈', '#1565c0', 'reservoir,lake', 'water'],
     ['pond', 'Unnamed ponds (1+ acre, year-round)', '≈', '#5e9fd0', 'pond', 'water'],

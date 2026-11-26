@@ -31,6 +31,14 @@ python3 tools/build_region_nl.py demo  --province ZH
 python3 server.py --data derived/regions/NL-ZH/demo --no-index
 ```
 
+Een provinciekaart naast je eigen bibliotheek, zonder iets in die bibliotheek te veranderen: geef met `--map` (of
+`LASTBOOK_MAP`) de map `derived/geo` van de provincie mee. Voor de desktop-app:
+
+```sh
+LASTBOOK_MAP="$PWD/derived/regions/NL-ZH/data/derived/geo" .venv/bin/python app/main.py
+python3 server.py --data /pad/naar/LastbookData --map derived/regions/NL-ZH/data/derived/geo   # of de serverversie
+```
+
 Provincies: GR, FR, DR, OV, FL, GE, UT, NH, ZH, ZE, NB, LI, of `--province all` voor alle twaalf. Adressen worden één
 keer per gebied opgehaald en gedeeld tussen buurprovincies (`derived/regions/NL-shared/`); voor heel Nederland zijn dat
 miljoenen adressen, dus reken op een flinke downloadtijd en een paar GB. Een provincie die faalt houdt de rest niet tegen.

@@ -29,21 +29,34 @@ from pathlib import Path
 if __name__ == '__main__':  # --data must be known before the paths below are worked out
     _pre = argparse.ArgumentParser(add_help=False)
     _pre.add_argument('--data')
-    _data = _pre.parse_known_args()[0].data
-    if _data:
-        os.environ['LASTBOOK_DATA'] = _data
+    _pre.add_argument('--map')
+    _known = _pre.parse_known_args()[0]
+    if _known.data:
+        os.environ['LASTBOOK_DATA'] = _known.data
+    if _known.map:
+        os.environ['LASTBOOK_MAP'] = _known.map
 
 import engine.paths as lastbook_paths  # noqa: E402  (data folder and program folder can differ in the packaged app)
 from engine.paths import ro_uri  # noqa: E402
 from engine import saved_pages, address_search, encyclopedias, dutch_query  # noqa: E402
 from engine.setup import api as setup_api  # noqa: E402  (the one module that may download: only when the person asks)
 HERE = lastbook_paths.DATA  # holds derived/
+# The map's folder: the library's own derived/geo, or a map set kept beside it, such as a Dutch province built by
+# tools/build_region_nl.py (LASTBOOK_MAP or --map names its derived/geo folder; the library is left as it is).
+MAP_DIR = os.environ.get('LASTBOOK_MAP')
+
+
+def geo_dir():
+    return Path(MAP_DIR).expanduser() if MAP_DIR else HERE / 'derived' / 'geo'
+
+
+GEO = geo_dir()
 APP = lastbook_paths.APP  # holds web/ and content/
 LIB = lastbook_paths.LIB
 WEB = APP / 'web'
 CACHE = HERE / 'derived' / 'cache'
-MAPDB = HERE / 'derived' / 'geo' / 'map.sqlite'
-PLACEDB = HERE / 'derived' / 'geo' / 'places.sqlite'
+MAPDB = GEO / 'map.sqlite'
+PLACEDB = GEO / 'places.sqlite'
 os.environ.setdefault('SURVIVAL_DISABLE_INDEX_WATCH', '1')
 import engine.library as library  # noqa: E402  (provides Handler, search DB path, ZIM reader)
 import retrieval, assistant  # noqa: E402
@@ -764,7 +777,7 @@ def mapdb():
 
 
 def national_mapdb():
-    path = HERE / 'derived/geo/national.sqlite'
+    path = geo_dir() / 'national.sqlite'
     if not path.exists():
         return None
     if not hasattr(_tls, 'national_map'):
@@ -774,7 +787,7 @@ def national_mapdb():
 
 
 def national_status():
-    path = HERE / 'derived/geo/national-status.json'
+    path = geo_dir() / 'national-status.json'
     try:
         return json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -788,7 +801,7 @@ _socal = {'cells': None}
 def socal_cells():
     """0.05° cells holding detailed SoCal features; national rows inside them are duplicates and are skipped."""
     if _socal['cells'] is None:
-        cache = HERE / 'derived/geo/socal-cells.json'
+        cache = geo_dir() / 'socal-cells.json'
         try:
             _socal['cells'] = set(json.loads(cache.read_text(encoding='utf-8')))
         except (OSError, ValueError):
@@ -858,10 +871,10 @@ def clip_ring(pts, x0, y0, x1, y1):
 EXT = 512
 
 
-TERRAINDB = HERE / 'derived/geo/terrain.sqlite'
+TERRAINDB = GEO / 'terrain.sqlite'
 
 
-TERRAIN_DETAIL = HERE / 'derived/geo/terrain-detail.sqlite'
+TERRAIN_DETAIL = GEO / 'terrain-detail.sqlite'
 
 
 def terrain_tile(z, x, y):
@@ -912,7 +925,7 @@ def map_tile(z, x, y):
     if z > 9 or national_status().get('state') != 'complete':
         return _map_tile(z, x, y, version)
     # zoomed-out tiles cover huge areas and are slow to assemble: keep them on disk once the data has settled
-    path = HERE / f'derived/geo/tilecache/{version}/{z}/{x}/{y}.json'
+    path = geo_dir() / f'tilecache/{version}/{z}/{x}/{y}.json'
     try:
         return path.read_bytes()
     except OSError:
@@ -994,7 +1007,7 @@ def _map_tile(z, x, y, version):
     return json.dumps({'z': z, 'layers': layers}, separators=(',', ':')).encode()
 
 
-BLDGDB = HERE / 'derived/geo/buildings.sqlite'
+BLDGDB = GEO / 'buildings.sqlite'
 
 
 @functools.lru_cache(maxsize=192)
@@ -1017,11 +1030,11 @@ def ms_bucket(x14, y14, version):
     return out
 
 
-AERIALDB = HERE / 'derived/geo/aerial.sqlite'
+AERIALDB = GEO / 'aerial.sqlite'
 
 
-AERIAL_DETAIL = HERE / 'derived/geo/aerial-detail.sqlite'
-AERIAL_COAST = HERE / 'derived/geo/aerial-coast.sqlite'
+AERIAL_DETAIL = GEO / 'aerial-detail.sqlite'
+AERIAL_COAST = GEO / 'aerial-coast.sqlite'
 
 
 def aerial_tile(z, x, y):
@@ -1118,14 +1131,15 @@ HELP = {'hospital': 'Hospital', 'clinic': 'Clinic', 'doctors': 'Doctor', 'pharma
         'college': 'College', 'university': 'University', 'kindergarten': 'Kindergarten', 'beach': 'Beach',
         'embassy': 'Embassy', 'mineral': 'Recorded mineral / mine', 'oil_gas_well': 'Recorded oil / gas well',
         'boat_launch': 'Boating facility', 'fish_stocking': 'Fish-stocking record',
+        'ferry_terminal': 'Ferry terminal',   # the way off an island (Dutch maps: tools/build_region_nl.py)
         'dam': 'Dam (National Inventory of Dams)', 'reservoir': 'Reservoir', 'lake': 'Lake or pond', 'pond': 'Pond',
         'orchard': 'Orchard', 'vineyard': 'Vineyard', 'berries': 'Berry field', 'perennial_veg': 'Asparagus field'}
 
 
 CROP_KINDS = {'orchard', 'vineyard', 'berries', 'perennial_veg'}
 RESOURCE_KINDS = {'mineral', 'oil_gas_well', 'boat_launch', 'fish_stocking', 'dam', 'reservoir', 'lake', 'pond'} | CROP_KINDS
-WATERDB = HERE / 'derived/geo/water.sqlite'
-CROPDB = HERE / 'derived/geo/crops.sqlite'
+WATERDB = GEO / 'water.sqlite'
+CROPDB = GEO / 'crops.sqlite'
 
 
 def resource_dbs(kinds):
@@ -1457,7 +1471,7 @@ def water_places(q, limit=10, near=None):
 
 def places(q, limit=20, near=None):
     if address_search.is_address_query(q):
-        return address_search.find_addresses(q, HERE / 'derived' / 'geo', limit=min(limit, 8), near=near)
+        return address_search.find_addresses(q, geo_dir(), limit=min(limit, 8), near=near)
     if not PLACEDB.exists():
         return []
     db = sqlite3.connect(ro_uri(PLACEDB), uri=True)
@@ -1580,7 +1594,7 @@ def _distinct(path, sql):
 def map_contents():
     """What a pack's map really holds, decided from its own files: which pin kinds, and the box they fall in. The rest of the map is the plain base."""
     kinds, boxes = set(), []
-    for path in (MAPDB, HERE / 'derived/geo/national.sqlite'):
+    for path in (MAPDB, geo_dir() / 'national.sqlite'):
         kinds |= set(_distinct(path, 'SELECT DISTINCT cls FROM poi'))
         if Path(path).exists():
             db = sqlite3.connect(ro_uri(path), uri=True)
@@ -2227,6 +2241,7 @@ def main():
     ap.add_argument('--lan', action='store_true', help='also serve phones on the same network; they need the printed access link')
     ap.add_argument('--no-index', action='store_true', help='do not update the semantic index in the background')
     ap.add_argument('--data', help='data folder holding library-data/ and derived/ (or set LASTBOOK_DATA); default: beside this program')
+    ap.add_argument('--map', help='a map set kept outside the library: its derived/geo folder (or set LASTBOOK_MAP), such as derived/regions/NL-ZH/data/derived/geo')
     a = ap.parse_args()
     init(a.no_index)
     setup_api.follow_model_server(assistant.use_server)   # a model server chosen in Setup (#78)
