@@ -551,7 +551,11 @@ def ferry_terminals(gpkg):
 
 # Geofabrik's free extract keeps no AEDs, so they come from OpenStreetMap itself through the Overpass API: the same data
 # and licence as the rest of the map, one query per province by its official ISO 3166-2 boundary in OpenStreetMap.
-OVERPASS = 'https://overpass-api.de/api/interpreter'
+# Public Overpass instances, asked in this order: when one is down or busy (502, 503, 504, 429, no answer) the next is
+# asked straight away, and only when all have failed is there a wait before another round. --overpass puts one first.
+OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter',
+            'https://maps.mail.ru/osm/tools/overpass/api/interpreter']
+OVERPASS_ROUNDS = 3
 AED_QUERY = ('[out:json][timeout:180];'
              'area["ISO3166-2"="{region}"]["boundary"="administrative"]->.province;'
              'nwr["emergency"="defibrillator"](area.province);out center tags;')
@@ -596,24 +600,35 @@ def fetch_aeds(force=False):
     query = AED_QUERY.format(region=REGION)
     log('AEDs (OpenStreetMap, Overpass API)', REGION)
     body = urllib.parse.urlencode({'data': query}).encode('utf-8')
-    answer = None
-    for attempt in range(4):
-        try:
-            request = urllib.request.Request(OVERPASS, data=body, headers={'User-Agent': 'lastbook-region-builder'})
-            with urllib.request.urlopen(request, timeout=240) as response:
-                answer = json.loads(response.read().decode('utf-8'))
+    answer, served_by, failures = None, None, []
+    for round_ in range(OVERPASS_ROUNDS):
+        if round_:
+            log('every Overpass instance busy or unreachable; trying them again in', 60 * round_, 's')
+            time.sleep(60 * round_)
+        for url in OVERPASS:
+            try:
+                request = urllib.request.Request(url, data=body, headers={'User-Agent': 'lastbook-region-builder'})
+                with urllib.request.urlopen(request, timeout=240) as response:
+                    answer = json.loads(response.read().decode('utf-8'))
+                served_by = url
+                break
+            except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ValueError) as error:
+                host = urllib.parse.urlsplit(url).hostname
+                failures.append(f'{host}: {error}')
+                log('Overpass', host, 'busy or unreachable:', error)
+        if answer is not None:
             break
-        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ValueError) as error:
-            # Overpass answers 429 or 504 when it is busy: wait, then ask once more, a few times at most.
-            if attempt == 3:
-                raise SystemExit(f'{REGION}: the Overpass API did not answer ({error}); run aed --province {CODE} later')
-            log('Overpass busy or unreachable:', error, '; asking again in', 30 * (attempt + 1), 's')
-            time.sleep(30 * (attempt + 1))
+    if answer is None:
+        raise SystemExit(f'{REGION}: no Overpass instance answered ({"; ".join(failures[-len(OVERPASS):])}); '
+                         f'run aed --province {CODE} later')
     if answer.get('remark'):         # a query that ran out of time or memory still answers 200, with a remark
         raise SystemExit(f'{REGION}: Overpass did not finish the query: {answer["remark"]}')
+    if not answer.get('elements'):   # a province always has some: none means the boundary was not found
+        raise SystemExit(f'{REGION}: Overpass ({served_by}) found no AEDs at all; the province boundary '
+                         f'(ISO3166-2={REGION}) may not be in its data. Nothing saved.')
     points, private = aed_points(answer)
     saved = {'fetched': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
-             'osm_as_of': (answer.get('osm3s') or {}).get('timestamp_osm_base'), 'url': OVERPASS, 'query': query,
+             'osm_as_of': (answer.get('osm3s') or {}).get('timestamp_osm_base'), 'url': served_by, 'query': query,
              'licence': AED_LICENCE, 'attribution': '© OpenStreetMap contributors',
              'not_public_left_out': private, 'points': [list(p) for p in points]}
     SOURCE.mkdir(parents=True, exist_ok=True)
@@ -1088,12 +1103,15 @@ def main():
     parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge', 'aed'))
     parser.add_argument('--province', required=True, help='two-letter code (' + ', '.join(PROVINCES) + ') or all')
     parser.add_argument('--refresh', action='store_true', help='fetch, aed: download the OpenStreetMap extract and the AEDs even if recent')
+    parser.add_argument('--overpass', help='fetch, aed: the Overpass instance to ask first (its .../api/interpreter URL)')
     args = parser.parse_args()
     if args.step == 'merge':      # the provinces already built, as one map of the whole country
         merge(None if args.province.lower() == 'all' else [c.strip().upper().removeprefix('NL-') for c in args.province.split(',')])
         return
     global REFRESH
     REFRESH = args.refresh
+    if args.overpass:
+        OVERPASS[:] = [args.overpass] + [u for u in OVERPASS if u != args.overpass]
     codes = list(PROVINCES) if args.province.lower() == 'all' else [args.province]
     if args.step == 'fetch':
         try:

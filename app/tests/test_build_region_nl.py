@@ -509,7 +509,7 @@ class AEDs(unittest.TestCase):
                 return json.dumps(self.body).encode('utf-8')
 
         def urlopen(request, timeout=None):
-            calls.append(urllib.parse.parse_qs(request.data.decode('utf-8'))['data'][0])
+            calls.append((request.full_url, urllib.parse.parse_qs(request.data.decode('utf-8'))['data'][0]))
             answer = answers[len(calls) - 1]
             if isinstance(answer, Exception):
                 raise answer
@@ -529,21 +529,50 @@ class AEDs(unittest.TestCase):
             saved = nl.fetch_aeds()
             again = nl.fetch_aeds()                           # younger than OSM_MAX_AGE: not asked again
         self.assertEqual(len(calls), 1)
-        self.assertIn('area["ISO3166-2"="NL-FR"]', calls[0])
-        self.assertIn('nwr["emergency"="defibrillator"]', calls[0])
+        self.assertEqual(calls[0][0], nl.OVERPASS[0])
+        self.assertIn('area["ISO3166-2"="NL-FR"]', calls[0][1])
+        self.assertIn('nwr["emergency"="defibrillator"]', calls[0][1])
+        self.assertEqual(saved['url'], nl.OVERPASS[0])
         self.assertEqual(saved['osm_as_of'], '2026-11-26T17:55:00Z')
         self.assertEqual(len(saved['points']), 3)
         self.assertEqual(again['points'], saved['points'])
         self.assertTrue((self.base / 'source' / 'aeds.json').is_file())
 
-    def test_a_busy_overpass_is_asked_again(self):
-        busy = urllib.error.HTTPError(nl.OVERPASS, 429, 'Too Many Requests', {}, None)
-        urlopen, calls = self.overpass(busy, self.ANSWER)
+    def test_a_failing_instance_hands_over_to_the_next(self):
+        down = urllib.error.HTTPError(nl.OVERPASS[0], 502, 'Bad Gateway', {}, None)
+        urlopen, calls = self.overpass(down, self.ANSWER)
         with mock.patch.object(nl.urllib.request, 'urlopen', urlopen), mock.patch.object(nl.time, 'sleep') as slept:
             saved = nl.fetch_aeds()
-        self.assertEqual(len(calls), 2)
-        slept.assert_called_once_with(30)
+        self.assertEqual([url for url, _ in calls], nl.OVERPASS[:2])
+        slept.assert_not_called()                             # the next instance straight away, no waiting
+        self.assertEqual(saved['url'], nl.OVERPASS[1])
         self.assertEqual(len(saved['points']), 3)
+
+    def test_all_down_waits_and_tries_them_again(self):
+        busy = [urllib.error.HTTPError(u, 504, 'Gateway Timeout', {}, None) for u in nl.OVERPASS]
+        urlopen, calls = self.overpass(*busy, self.ANSWER)
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen), mock.patch.object(nl.time, 'sleep') as slept:
+            saved = nl.fetch_aeds()
+        self.assertEqual(len(calls), len(nl.OVERPASS) + 1)
+        slept.assert_called_once_with(60)
+        self.assertEqual(saved['url'], nl.OVERPASS[0])
+
+    def test_nobody_answering_saves_nothing(self):
+        down = [urllib.error.URLError('no route') for _ in range(nl.OVERPASS_ROUNDS * len(nl.OVERPASS))]
+        urlopen, calls = self.overpass(*down)
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen), mock.patch.object(nl.time, 'sleep'), \
+                self.assertRaises(SystemExit) as stopped:
+            nl.fetch_aeds()
+        self.assertEqual(len(calls), nl.OVERPASS_ROUNDS * len(nl.OVERPASS))
+        self.assertIn('aed --province FR later', str(stopped.exception))
+        self.assertFalse((self.base / 'source' / 'aeds.json').exists())
+
+    def test_no_aeds_at_all_means_the_boundary_was_not_found(self):
+        urlopen, _ = self.overpass({'osm3s': {}, 'elements': []})
+        with mock.patch.object(nl.urllib.request, 'urlopen', urlopen), self.assertRaises(SystemExit) as stopped:
+            nl.fetch_aeds()
+        self.assertIn('ISO3166-2=NL-FR', str(stopped.exception))
+        self.assertFalse((self.base / 'source' / 'aeds.json').exists())
 
     def test_an_unfinished_query_is_not_kept(self):
         urlopen, _ = self.overpass({'remark': 'runtime error: Query timed out', 'elements': []})
