@@ -50,6 +50,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -447,6 +448,10 @@ def fetch():
         fetch_aeds(force=REFRESH)
     except SystemExit as error:      # the map is complete without them; aed --province fetches them later
         log('AEDs not fetched:', error)
+    try:
+        fetch_seh(force=REFRESH)
+    except (SystemExit, OSError, urllib.error.URLError, zipfile.BadZipFile) as error:   # seh --province fetches it later
+        log('SEH list not fetched:', error)
 
 
 # ------------------------------------------------------------------ build ----
@@ -651,11 +656,7 @@ def add_aeds(national, saved):
         db.execute("DELETE FROM poi WHERE cls = 'defibrillator'")
         db.executemany('INSERT INTO poi(cls, name, lon, lat) VALUES (?, ?, ?, ?)',
                        [('defibrillator', name, lon, lat) for name, lon, lat in saved['points']])
-        meta = dict(db.execute('SELECT key, value FROM meta').fetchall())
-        base = (meta.get('help_points') or 'all classes: OpenStreetMap (ODbL 1.0)').split('; AEDs')[0]
-        db.execute('INSERT OR REPLACE INTO meta VALUES (?, ?)', (
-            'help_points', f"{base}; AEDs: OpenStreetMap via the Overpass API, as of "
-                           f"{saved.get('osm_as_of') or saved.get('fetched')} (ODbL 1.0)"))
+        add_note(db, 'AEDs', f"OpenStreetMap via the Overpass API, as of {saved.get('osm_as_of') or saved.get('fetched')} (ODbL 1.0)")
         db.commit()
     finally:
         db.close()
@@ -672,12 +673,190 @@ def aed():
         log(REGION, 'is not built yet: its AEDs are saved and go in with its build')
         return
     count = add_aeds(national, saved)
+    refresh_report(data, {'aeds': count}, {'aeds.json': aed_source(saved)})
+    log(REGION, count, 'AEDs on the map')
+
+
+# -------------------------------------------------------------------- SEH ----
+
+# Every hospital location with an emergency department (SEH) answers the RIVM's yearly questionnaire; the answers per
+# location are on data.rivm.nl under the Public Domain Mark: opening hours, acute obstetrics, a GP out-of-hours post
+# (huisartsenpost) in the building. Each SEH becomes a help point of class 'emergency_department', placed at its own
+# address in the BAG, so nothing is geocoded online. The list is the whole country's, kept in NL-shared/.
+SEH_URL = ('https://data.rivm.nl/meta/srv/api/records/afbdf4b9-00f0-4d4e-a67e-fd3bbc8c833c/attachments/'
+           'Antwoorden%20vragenlijst%202026%20tbv%20data.rivm.nl.zip')
+SEH_TITLE = "RIVM, Vragenlijst aanbod SEH's en Acute Verloskunde 2026"
+SEH_LICENCE = 'Public Domain Mark 1.0'
+SEH_SHEET = 'Reguliere vragenlijst'
+SEH_MAX_AGE = 30     # days; the RIVM publishes the answers once a year
+SEH_PLACED = set()   # (name, postcode) placed by seh() in this run, to tell which were placed in no province
+
+
+def xlsx_rows(path, sheet):
+    """The rows of one sheet of an .xlsx file as lists of strings (None for an empty cell), read with the standard
+    library only: a workbook is a zip of XML parts."""
+    m = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+    r = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
+    with zipfile.ZipFile(path) as book:
+        shared = []
+        if 'xl/sharedStrings.xml' in book.namelist():
+            shared = [''.join(t.text or '' for t in si.iter(m + 't'))
+                      for si in ElementTree.fromstring(book.read('xl/sharedStrings.xml')).iter(m + 'si')]
+        workbook = ElementTree.fromstring(book.read('xl/workbook.xml'))
+        targets = {rel.get('Id'): rel.get('Target') for rel in ElementTree.fromstring(book.read('xl/_rels/workbook.xml.rels'))}
+        found = [s.get(r + 'id') for s in workbook.iter(m + 'sheet') if s.get('name') == sheet]
+        if not found:
+            raise SystemExit(f'{path.name}: no sheet named {sheet!r}')
+        part = targets[found[0]].lstrip('/')
+        part = part if part.startswith('xl/') else 'xl/' + part
+        rows = []
+        for row in ElementTree.fromstring(book.read(part)).iter(m + 'row'):
+            cells = {}
+            for cell in row.iter(m + 'c'):
+                letters = ''.join(ch for ch in cell.get('r', '') if ch.isalpha())
+                column = 0
+                for ch in letters:
+                    column = column * 26 + ord(ch.upper()) - 64
+                value = cell.find(m + 'v')
+                if cell.get('t') == 's' and value is not None:
+                    text = shared[int(value.text)]
+                elif cell.get('t') == 'inlineStr':
+                    text = ''.join(t.text or '' for t in cell.iter(m + 't'))
+                else:
+                    text = value.text if value is not None else None
+                cells[column - 1] = text.replace('_x000D_', '').strip() if isinstance(text, str) else text
+            rows.append([cells.get(i) for i in range(max(cells) + 1)] if cells else [])
+        return rows
+
+
+def seh_locations(path):
+    """Each SEH in the RIVM's answers: {name, place, street, postcode, all_hours, periods, obstetrics, gp_post}."""
+    rows = xlsx_rows(path, SEH_SHEET)
+    header_at = next((i for i, row in enumerate(rows) if row and (row[0] or '').startswith('Naam ziekenhuis')), None)
+    if header_at is None:
+        raise SystemExit(f'{path.name}: no header row starting with "Naam ziekenhuis" in sheet {SEH_SHEET!r}')
+    header = [(h or '').strip() for h in rows[header_at]]
+
+    def column(start, after=-1):
+        hit = next((i for i, h in enumerate(header) if i > after and h.lower().startswith(start.lower())), None)
+        if hit is None:
+            raise SystemExit(f'{path.name}: no column starting with {start!r}; the RIVM changed its sheet')
+        return hit
+    hours = column('Heeft uw ziekenhuislocatie een spoedeisende hulpafdeling')
+    cols = {'name': column('Naam ziekenhuis'), 'place': column('Plaats'), 'street': column('Adres'),
+            'postcode': column('Postcode'), 'offer': column('Volgens onze informatie'), 'hours': hours,
+            'day': column('Overdag', hours), 'evening': column('’s Avonds', hours), 'night': column('’s Nachts', hours),
+            'gp': column('Is er op deze ziekenhuislocatie een huisartsenpost')}
+    out = []
+    for row in rows[header_at + 1:]:
+        value = {k: (row[i] if i < len(row) else None) for k, i in cols.items()}
+        if not value['name']:
+            continue
+        offer, gp = (value['offer'] or '').lower(), (value['gp'] or '').lower()
+        out.append({
+            'name': ' '.join(value['name'].split()), 'place': value['place'], 'street': value['street'],
+            'postcode': (value['postcode'] or '').replace(' ', '').upper(),
+            'all_hours': '24/7' in (value['hours'] or '') and 'niet 24/7' not in (value['hours'] or ''),
+            'periods': [p for p, k in (('overdag', 'day'), ("'s avonds", 'evening'), ("'s nachts", 'night')) if value[k]],
+            'obstetrics': 'acute verloskunde' in offer and 'geen acute verloskunde' not in offer,
+            'gp_post': 'in building' if gp.startswith('ja, de hap is in het ziekenhuis') else
+                       'nearby' if gp.startswith('ja') else None})
+    return out
+
+
+def seh_name(seh):
+    """'SEH 24/7 · Noordwest Ziekenhuisgroep Alkmaar · acute verloskunde'; the hours when not day and night, and the
+    place when the name does not say it ('Dijklander Ziekenhuis (Hoorn)')."""
+    when = '24/7' if seh['all_hours'] else 'niet 24/7 (' + ' en '.join(seh['periods'] or ['beperkt']) + ')'
+    extra = [{'in building': 'huisartsenpost in het gebouw', 'nearby': 'huisartsenpost vlakbij'}.get(seh['gp_post']),
+             'acute verloskunde' if seh['obstetrics'] else None]
+    title = seh['name']
+    if seh.get('place') and fold(seh['place']) not in fold(title):
+        title += f" ({seh['place']})"
+    return ' · '.join([f'SEH {when}', title] + [e for e in extra if e])[:160]
+
+
+def fetch_seh(force=False):
+    """The RIVM's answers, kept as NL-shared/seh.xlsx with NL-shared/seh.json saying when and from where; a copy
+    younger than SEH_MAX_AGE days is used again unless force (--refresh). Returns the .xlsx path."""
+    xlsx, about = SHARED / 'seh.xlsx', SHARED / 'seh.json'
+    if xlsx.exists() and about.exists() and not force and (time.time() - xlsx.stat().st_mtime) / 86400 < SEH_MAX_AGE:
+        return xlsx
+    SHARED.mkdir(parents=True, exist_ok=True)
+    log('SEH (RIVM)', SEH_URL)
+    archive = SHARED / 'seh.zip'
+    download(SEH_URL, archive)
+    with zipfile.ZipFile(archive) as z:
+        member = next((n for n in z.namelist() if n.lower().endswith('.xlsx')), None)
+        if not member:
+            raise SystemExit(f'{SEH_URL}: no .xlsx in the archive')
+        xlsx.write_bytes(z.read(member))
+    found = seh_locations(xlsx)
+    about.write_text(json.dumps({'url': SEH_URL, 'title': SEH_TITLE, 'licence': SEH_LICENCE, 'file': member,
+                                 'fetched': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+                                 'locations': len(found)}, indent=1, ensure_ascii=False), encoding='utf-8')
+    log('SEH locations in the RIVM list:', len(found))
+    return xlsx
+
+
+def place_at(index, street, postcode):
+    """(lat, lon) of a BAG address: the house itself ('Wilhelminalaan 12', '1815JD'), else the first of a range
+    ('3-11'), else the middle of its postcode; None when the postcode is not in this index."""
+    m = re.fullmatch(r'(.*?)\s+(\d+)\s*([A-Za-z])?(?:\s*-\s*(\S+))?', (street or '').strip())
+    number, letter = (m.group(2), m.group(3)) if m else (None, None)
+    tries = [house(number, letter), number] if number else []
+    for num in [t for t in tries if t]:
+        hit = index.execute('SELECT avg(lat), avg(lon) FROM addr WHERE zip=? AND upper(num)=upper(?)', (postcode, num)).fetchone()
+        if hit[0] is not None:
+            return hit
+    hit = index.execute('SELECT avg(lat), avg(lon) FROM addr WHERE zip=?', (postcode,)).fetchone()
+    return hit if hit[0] is not None else None
+
+
+def add_seh(geo, xlsx, region=None):
+    """The SEHs whose address is in this province's BAG index, as help points of class 'emergency_department' (in
+    place of any already there). Returns (name, postcode) of each placed."""
+    region = region or REGION
+    index = sqlite3.connect(f"file:{geo / 'addresses' / (region + '.sqlite')}?mode=ro", uri=True)
+    try:
+        points = []
+        for seh in seh_locations(xlsx):
+            spot = place_at(index, seh['street'], seh['postcode'])
+            if spot:
+                points.append((seh_name(seh), spot[1], spot[0], (seh['name'], seh['postcode'])))
+    finally:
+        index.close()
+    about = json.loads((xlsx.parent / 'seh.json').read_text(encoding='utf-8')) if (xlsx.parent / 'seh.json').exists() else {}
+    db = sqlite3.connect(geo / 'national.sqlite')
+    try:
+        db.execute("DELETE FROM poi WHERE cls = 'emergency_department'")
+        db.executemany('INSERT INTO poi(cls, name, lon, lat) VALUES (?, ?, ?, ?)',
+                       [('emergency_department', name, lon, lat) for name, lon, lat, _ in points])
+        add_note(db, 'SEH', f"{SEH_TITLE} ({SEH_LICENCE}), fetched {about.get('fetched', '?')[:10]}, placed at their BAG address")
+        db.commit()
+    finally:
+        db.close()
+    return [plain for *_, plain in points]
+
+
+def add_note(db, label, text):
+    """Records in the map's meta where one kind of help point comes from: '...; AEDs: ...; SEH: ...'."""
+    meta = dict(db.execute('SELECT key, value FROM meta').fetchall())
+    parts = [p for p in (meta.get('help_points') or 'all classes: OpenStreetMap (ODbL 1.0)').split('; ')
+             if not p.startswith(label + ':')]
+    db.execute('INSERT OR REPLACE INTO meta VALUES (?, ?)', ('help_points', '; '.join(parts + [f'{label}: {text}'])))
+
+
+def refresh_report(data, counts=None, source=None):
+    """After help points were added in place: build.json's counts, sources and the map file's size and hash, and
+    map-set.json's sizes, follow."""
+    national = data / 'derived' / 'geo' / 'national.sqlite'
     name = national.relative_to(data).as_posix()
     report_path = data / 'build.json'
     if report_path.exists():
         report = json.loads(report_path.read_text(encoding='utf-8'))
-        report.setdefault('counts', {})['aeds'] = count
-        report.setdefault('sources', {}).setdefault('files', {})['aeds.json'] = aed_source(saved)
+        report.setdefault('counts', {}).update(counts or {})
+        report.setdefault('sources', {}).setdefault('files', {}).update(source or {})
         report.setdefault('outputs', {})[name] = {'bytes': national.stat().st_size, 'sha256': de.sha256(national)}
         report_path.write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding='utf-8')
     map_set = data / 'map-set.json'
@@ -687,7 +866,20 @@ def aed():
             listed['files'][name] = national.stat().st_size
             listed['bytes'] = sum(listed['files'].values())
             map_set.write_text(json.dumps(listed, indent=1), encoding='utf-8')
-    log(REGION, count, 'AEDs on the map')
+
+
+def seh():
+    """Adds the RIVM's SEHs to this province's built map in place; a later build keeps them (it reads NL-shared/)."""
+    xlsx = fetch_seh(force=REFRESH)
+    data = BASE / 'data'
+    if not (data / 'derived' / 'geo' / 'national.sqlite').is_file():
+        log(REGION, 'is not built yet: its SEHs go in with its build')
+        return
+    placed = add_seh(data / 'derived' / 'geo', xlsx)
+    SEH_PLACED.update(placed)
+    about = json.loads((SHARED / 'seh.json').read_text(encoding='utf-8'))
+    refresh_report(data, {'seh': len(placed)}, {'seh.xlsx': about})
+    log(REGION, len(placed), 'SEH(s):', ', '.join(name for name, _ in placed) or '-')
 
 
 def build_addresses(fetched, geo):
@@ -811,6 +1003,10 @@ def build():
         fetched.setdefault('files', {})['aeds.json'] = aed_source(saved)
     log('addresses (BAG)')
     counts.update(build_addresses(fetched, geo))
+    if (SHARED / 'seh.xlsx').is_file():          # placed at their BAG address, so after the address index
+        counts['seh'] = len(add_seh(geo, SHARED / 'seh.xlsx'))
+        fetched.setdefault('files', {})['seh.xlsx'] = json.loads((SHARED / 'seh.json').read_text(encoding='utf-8')) \
+            if (SHARED / 'seh.json').exists() else {'title': SEH_TITLE}
     log('places')
     counts.update(build_places(fetched, geo))
     map_files = {f.relative_to(staging).as_posix(): f.stat().st_size for f in sorted(geo.glob('*.sqlite'))}
@@ -909,6 +1105,9 @@ def check(data=None):
     expect(meta.get('region') == REGION and 'OpenStreetMap' in meta.get('source', ''), f"map meta: region {meta.get('region')}, source named")
     counts = report.get('counts', {})
     aeds = nat.execute("SELECT count(*) FROM poi WHERE cls='defibrillator'").fetchone()[0]
+    sehs = nat.execute("SELECT count(*) FROM poi WHERE cls='emergency_department'").fetchone()[0]
+    if 'seh' in counts or sehs:      # every province has at least one hospital with an SEH
+        expect(sehs >= 1, f'SEHs (RIVM): {sehs}')
     if 'aeds' in counts or aeds:
         expect(aeds >= MINIMUM['aeds'], f"AEDs (OpenStreetMap): {aeds:,} (expected at least {MINIMUM['aeds']})")
     else:          # a map without them still works; aed --province adds them
@@ -1038,7 +1237,7 @@ def merge(codes=None, out=None):
             bounds.append([float(v) for v in meta['bounds'].split(',')])
         if meta.get('data_as_of'):
             as_of.append(meta['data_as_of'])
-        if '; AEDs' in meta.get('help_points', ''):
+        if '; ' in meta.get('help_points', ''):       # AEDs, SEH: where they come from
             aed_note = meta['help_points'].split('; ', 1)[1]
         db.commit()
         db.execute('DETACH src')
@@ -1102,9 +1301,9 @@ def merge(codes=None, out=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge', 'aed'))
+    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge', 'aed', 'seh'))
     parser.add_argument('--province', required=True, help='two-letter code (' + ', '.join(PROVINCES) + ') or all')
-    parser.add_argument('--refresh', action='store_true', help='fetch, aed: download the OpenStreetMap extract and the AEDs even if recent')
+    parser.add_argument('--refresh', action='store_true', help='fetch, aed, seh: download the OpenStreetMap extract, the AEDs and the SEH list even if recent')
     parser.add_argument('--overpass', help='fetch, aed: the Overpass instance to ask first (its .../api/interpreter URL)')
     args = parser.parse_args()
     if args.step == 'merge':      # the provinces already built, as one map of the whole country
@@ -1130,12 +1329,16 @@ def main():
                 failed.append(REGION)
             continue
         try:
-            {'fetch': fetch, 'build': build, 'demo': demo, 'aed': aed}[args.step]()
+            {'fetch': fetch, 'build': build, 'demo': demo, 'aed': aed, 'seh': seh}[args.step]()
         except SystemExit as error:     # with all provinces, one that fails does not stop the others
             if len(codes) == 1:
                 raise
             log(REGION, 'failed:', error)
             failed.append(REGION)
+    if args.step == 'seh' and len(codes) == len(PROVINCES) and (SHARED / 'seh.xlsx').is_file():
+        unplaced = [f"{s['name']} ({s['postcode']})" for s in seh_locations(SHARED / 'seh.xlsx')
+                    if (s['name'], s['postcode']) not in SEH_PLACED]
+        log('SEHs placed:', len(SEH_PLACED), '; not found at their address in any province:', ', '.join(unplaced) or 'none')
     if failed:
         again = ' '.join(r.removeprefix('NL-') for r in failed)
         raise SystemExit(f'{args.step} not finished for {", ".join(failed)}; run it again for those '

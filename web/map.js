@@ -20,6 +20,7 @@ const MapView = (() => {
   // Map layers: id, label, symbol, colour, server classes, group, note
   const LAYERS = [
     ['hospital', 'Hospitals', 'H', '#c62828', 'hospital', 'help'],
+    ['seh', 'Emergency departments (SEH)', 'E', '#7f0000', 'emergency_department', 'help'],   // Dutch maps: RIVM's list, with opening hours
     ['clinic', 'Clinics & doctors', '+', '#d81b60', 'clinic,doctors', 'help'],
     ['dentist', 'Dentists', 'Dt', '#00695c', 'dentist', 'help'],
     ['pharmacy', 'Pharmacies', 'Rx', '#2e7d32', 'pharmacy,chemist', 'help'],
@@ -48,8 +49,8 @@ const MapView = (() => {
   ].map(([id, label, sym, col, cls, group]) => ({ id, label, sym, col, cls: cls.split(','), group }));
   const GROUPS = [['help', 'Emergency help'], ['water', 'Water'], ['supply', 'Supplies & camping'], ['food', 'Food that keeps growing (2025 crop maps)'], ['resource', 'Natural resources (historical records)']];
   const BY_CLS = {}; for (const l of LAYERS) for (const c of l.cls) BY_CLS[c] = l;
-  const DEFAULT_LAYERS = ['hospital', 'clinic', 'pharmacy', 'fire', 'police', 'aed', 'shelter', 'water', 'reservoir', 'fish', 'boat'];
-  const PRESETS = [['Emergency', ['hospital', 'clinic', 'dentist', 'pharmacy', 'fire', 'police', 'aed', 'shelter', 'community']], ['Water', ['water', 'spring', 'reservoir', 'pond', 'dam', 'fish', 'boat']],
+  const DEFAULT_LAYERS = ['hospital', 'seh', 'clinic', 'pharmacy', 'fire', 'police', 'aed', 'shelter', 'water', 'reservoir', 'fish', 'boat'];
+  const PRESETS = [['Emergency', ['hospital', 'seh', 'clinic', 'dentist', 'pharmacy', 'fire', 'police', 'aed', 'shelter', 'community']], ['Water', ['water', 'spring', 'reservoir', 'pond', 'dam', 'fish', 'boat']],
     ['Supplies', ['food', 'hardware', 'fuel', 'camp']], ['Food trees', ['orchard', 'vineyard', 'berries']], ['Resources', ['fish', 'boat', 'mineral', 'well']], ['All', LAYERS.map(l => l.id)]];
   const LEGACY = { all_resources: ['fish', 'boat', 'mineral', 'well'], mineral: ['mineral'], oil_gas_well: ['well'], fish_stocking: ['fish'], boat_launch: ['boat'] };
   const FIELD = { commod1: 'Commodity', commod2: 'Also', commod3: 'Also', ore: 'Ore', dev_stat: 'Recorded status', oper_type: 'Operation', yr_lst_prd: 'Last production year',

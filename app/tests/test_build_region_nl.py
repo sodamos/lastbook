@@ -71,6 +71,54 @@ def feature(i, street='Mekelweg', number='2', letter=None, addition=None, code='
         'provincie_afkorting': prov, 'provincie_naam': prov_name, 'adresseerbaar_object_type': 'Verblijfsobject'}}
 
 
+def seh_xlsx(path, rows, sheet='Reguliere vragenlijst'):
+    """A workbook as the RIVM publishes its SEH answers, cut down to the columns read: a reading guide first, then the
+    answers, with two rows above the header as in the real file. Written with the standard library only."""
+    header = ['Naam ziekenhuis', 'Plaats', 'Adres', 'Postcode',
+              'Volgens onze informatie heeft uw ziekenhuis het aanbod aan SEH en acute verloskunde zoals hiernaast aangegeven:',
+              'Toelichting indien anders:', 'Heeft uw ziekenhuislocatie een spoedeisende hulpafdeling en wat zijn de openingstijden van deze SEH?',
+              'Overdag (circa 08-17 uur)', '’s Avonds (circa 17-23 uur)', '’s Nachts (circa 23-08 uur)', 'Wat is het aantal SEH-behandelkamers?',
+              'Overdag', 'Is er op deze ziekenhuislocatie een huisartsenpost (HAP) aanwezig?']
+    table = [['Vraag Kwaliteitskader'], [None, None, 'Deel 1'], header] + rows
+
+    def cell(r, c, v):
+        ref = ''
+        c += 1
+        while c:
+            c, rest = divmod(c - 1, 26)
+            ref = chr(65 + rest) + ref
+        text = str(v).replace('&', '&amp;').replace('<', '&lt;')
+        return f'<c r="{ref}{r}" t="inlineStr"><is><t>{text}</t></is></c>'
+    sheet_xml = ('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+                 + ''.join(f'<row r="{i + 1}">' + ''.join(cell(i + 1, j, v) for j, v in enumerate(row) if v is not None) + '</row>'
+                           for i, row in enumerate(table)) + '</sheetData></worksheet>')
+    guide = ('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">'
+             '<c r="A1" t="inlineStr"><is><t>Overzicht</t></is></c></row></sheetData></worksheet>')
+    with zipfile.ZipFile(path, 'w') as book:
+        book.writestr('xl/workbook.xml', '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+                      '<sheet name="Leeswijzer" sheetId="1" r:id="rId1"/>'
+                      f'<sheet name="{sheet}" sheetId="2" r:id="rId2"/></sheets></workbook>')
+        book.writestr('xl/_rels/workbook.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                      '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="/xl/worksheets/sheet2.xml"/>'
+                      '</Relationships>')
+        book.writestr('xl/worksheets/sheet1.xml', guide)
+        book.writestr('xl/worksheets/sheet2.xml', sheet_xml)
+    return path
+
+
+SEH_ROWS = [
+    ['Reinier de Graaf', 'Delft', 'Reinier de Graafweg 3-11', '2625 AD', 'Zowel een SEH alsook acute verloskunde', None,
+     'De SEH is 24 uur per dag 7 dagen per week (24/7) geopend', None, None, None, '30', None,
+     'Ja, de HAP is in het ziekenhuis gevestigd en heeft een gezamenlijke ingang met de SEH'],
+    ['Franciscus Vlietland', 'Schiedam', 'Vlietlandplein 2', '3118 JH', 'Wel een SEH (dag- en avond openstelling), geen acute verloskunde',
+     None, 'De SEH is niet 24/7 geopend maar heeft beperkte openingstijden:', 'Doordeweeks_x000D_\nWeekend/feestdagen',
+     'Doordeweeks', None, '12', 'Doordeweeks', 'Nee'],
+    ['Ziekenhuis Elders', 'Groningen', 'Hanzeplein 1', '9713 GZ', 'Zowel een SEH alsook acute verloskunde', None,
+     'De SEH is 24 uur per dag 7 dagen per week (24/7) geopend', None, None, None, '40', None, 'Nee'],
+]
+
+
 class Spelling(unittest.TestCase):
     def test_street_keys(self):
         self.assertEqual(nl.normalize_nl('Burg. Jansenstraat'), 'burg jansenstr')
@@ -343,6 +391,9 @@ class WholeBuild(unittest.TestCase):
         shared, base = root / 'NL-shared', root / f'NL-{code}'
         source = base / 'source'
         source.mkdir(parents=True)
+        if getattr(self, 'seh_rows', None):
+            shared.mkdir(parents=True, exist_ok=True)
+            seh_xlsx(shared / 'seh.xlsx', self.seh_rows)
         with mock.patch.object(nl, 'SHARED', shared):
             nl.select(code)
             cells = {}
@@ -455,6 +506,24 @@ class WholeBuild(unittest.TestCase):
         nat.close()
         report = json.loads((geo.parents[1] / 'build.json').read_text(encoding='utf-8'))
         self.assertEqual(report['counts']['aeds'], 2)
+
+    def test_the_seh_list_goes_into_the_build(self):
+        """Reinier de Graaf is placed at its BAG address in the built Zuid-Holland; Groningen's is not this province's."""
+        features = [feature(i, number=str(i), lon=4.3700 + i * 1e-5) for i in range(1, 200)]
+        features += [feature(1000, street='Rotterdamseweg', number='374', letter='A', code='2629HG'),
+                     feature(1001, street='Lorentzweg', number='1', code='2628CJ'), feature(1002, number='4'),
+                     feature(1003, street='Burg. Jansenstraat', number='7', code='2611AA', place='Den Haag'),
+                     feature(1006, street='Reinier de Graafweg', number='5', code='2625AD', lon=4.36, lat=52.01)]
+        pois = [('hospital', 'Reinier de Graaf', 4.36, 52.01), ('pharmacy', 'Apotheek Delft', 4.358, 52.012),
+                ('fire_station', 'Kazerne Delft', 4.355, 52.0), ('police', 'Politie Delft', 4.357, 52.008)]
+        self.seh_rows = SEH_ROWS
+        failures, geo = self.build('ZH', features, [(4.37 + i * 1e-4, 52.0) for i in range(30)], pois,
+                                   [('town', 'Delft', 4.357, 52.011)])
+        self.assertEqual(failures, [])
+        nat = sqlite3.connect(geo / 'national.sqlite')
+        self.assertEqual([n for n, in nat.execute("SELECT name FROM poi WHERE cls='emergency_department'")],
+                         ['SEH 24/7 · Reinier de Graaf (Delft) · huisartsenpost in het gebouw · acute verloskunde'])
+        nat.close()
 
     def test_an_island_left_out_fails_the_check(self):
         """A box or an extract that misses Schiermonnikoog must not pass as Fryslân."""
@@ -628,6 +697,107 @@ class AEDs(unittest.TestCase):
             nl.aed()
         self.assertTrue((self.base / 'source' / 'aeds.json').is_file())
         self.assertFalse((self.base / 'data').exists())
+
+
+class SEHs(unittest.TestCase):
+    """The RIVM's list of emergency departments, placed at their BAG address."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.xlsx = seh_xlsx(self.root / 'seh.xlsx', SEH_ROWS)
+
+    def index(self, folder, rows, region='NL-ZH'):
+        (folder / 'addresses').mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(folder / 'addresses' / f'{region}.sqlite')
+        db.execute('CREATE TABLE addr(num TEXT, street TEXT, norm TEXT, city TEXT, state TEXT, zip TEXT, lat REAL, lon REAL, district TEXT)')
+        db.executemany('INSERT INTO addr VALUES (?,?,?,?,?,?,?,?,?)', rows)
+        db.commit()
+        db.close()
+        national = sqlite3.connect(folder / 'national.sqlite')
+        national.executescript("CREATE TABLE poi(id INTEGER PRIMARY KEY, cls TEXT, name TEXT, lon REAL, lat REAL);"
+                               "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);"
+                               "INSERT INTO meta VALUES ('help_points', 'all classes: OpenStreetMap (ODbL 1.0); AEDs: OpenStreetMap');")
+        national.commit()
+        national.close()
+
+    ZH = [('3', 'Reinier de Graafweg', 'reinier de graafweg', 'Delft', 'NL-ZH', '2625AD', 52.0, 4.36, 'Delft'),
+          ('5', 'Reinier de Graafweg', 'reinier de graafweg', 'Delft', 'NL-ZH', '2625AD', 52.1, 4.37, 'Delft'),
+          ('4', 'Vlietlandplein', 'vlietlandplein', 'Schiedam', 'NL-ZH', '3118JH', 51.93, 4.39, 'Schiedam'),
+          ('6', 'Vlietlandplein', 'vlietlandplein', 'Schiedam', 'NL-ZH', '3118JH', 51.95, 4.41, 'Schiedam')]
+
+    def test_the_answers_are_read_by_their_headers(self):
+        found = nl.seh_locations(self.xlsx)
+        self.assertEqual([f['name'] for f in found], ['Reinier de Graaf', 'Franciscus Vlietland', 'Ziekenhuis Elders'])
+        delft, schiedam = found[0], found[1]
+        self.assertTrue(delft['all_hours'])
+        self.assertEqual((delft['postcode'], delft['obstetrics'], delft['gp_post']), ('2625AD', True, 'in building'))
+        self.assertFalse(schiedam['all_hours'])
+        self.assertEqual(schiedam['periods'], ['overdag', "'s avonds"])       # the first Overdag column, not the later one
+        self.assertEqual((schiedam['obstetrics'], schiedam['gp_post']), (False, None))
+
+    def test_names_say_hours_place_and_what_else_is_there(self):
+        found = nl.seh_locations(self.xlsx)
+        self.assertEqual(nl.seh_name(found[0]), 'SEH 24/7 · Reinier de Graaf (Delft) · huisartsenpost in het gebouw · acute verloskunde')
+        self.assertEqual(nl.seh_name(found[1]), "SEH niet 24/7 (overdag en 's avonds) · Franciscus Vlietland (Schiedam)")
+
+    def test_fetch_keeps_the_workbook_and_where_it_came_from(self):
+        shared = self.root / 'NL-shared'
+
+        def download(url, path):
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.write(self.xlsx, 'Antwoorden vragenlijst 2026 tbv data.rivm.nl.xlsx')
+            return url
+        with mock.patch.multiple(nl, SHARED=shared, download=mock.Mock(side_effect=download), log=lambda *a: None):
+            first = nl.fetch_seh()
+            again = nl.fetch_seh()                            # recent: not downloaded again
+            self.assertEqual(nl.download.call_count, 1)
+        self.assertEqual(first, again)
+        about = json.loads((shared / 'seh.json').read_text(encoding='utf-8'))
+        self.assertEqual((about['locations'], about['licence']), (3, 'Public Domain Mark 1.0'))
+
+    def test_a_changed_sheet_is_noticed(self):
+        other = seh_xlsx(self.root / 'other.xlsx', SEH_ROWS, sheet='Antwoorden')
+        with self.assertRaises(SystemExit):
+            nl.seh_locations(other)
+
+    def test_placed_at_the_house_the_first_of_a_range_or_the_postcode(self):
+        self.index(self.root / 'geo', self.ZH)
+        index = sqlite3.connect(self.root / 'geo' / 'addresses' / 'NL-ZH.sqlite')
+        self.assertEqual(nl.place_at(index, 'Reinier de Graafweg 3-11', '2625AD'), (52.0, 4.36))   # 3, the first
+        self.assertEqual(nl.place_at(index, 'Vlietlandplein 2', '3118JH'), (51.94, 4.4))           # no 2: its postcode
+        self.assertIsNone(nl.place_at(index, 'Hanzeplein 1', '9713GZ'))                           # another province
+        index.close()
+
+    def test_the_seh_step_adds_this_provinces_in_place(self):
+        base = self.root / 'NL-ZH'
+        geo = base / 'data' / 'derived' / 'geo'
+        self.index(geo, self.ZH)
+        (base / 'data' / 'build.json').write_text(json.dumps({'counts': {}}), encoding='utf-8')
+        shared = self.root / 'NL-shared'
+        shared.mkdir()
+        (shared / 'seh.xlsx').write_bytes(self.xlsx.read_bytes())
+        (shared / 'seh.json').write_text(json.dumps({'fetched': '2026-11-26T19:00:00+00:00', 'title': nl.SEH_TITLE}), encoding='utf-8')
+        with mock.patch.multiple(nl, SHARED=shared, log=lambda *a: None):
+            nl.select('ZH')
+            with mock.patch.multiple(nl, BASE=base, SOURCE=base / 'source', DATA=base / 'data', SEH_PLACED=set()):
+                nl.seh()
+                nl.seh()                                      # again: the same SEHs, not twice
+                placed = set(nl.SEH_PLACED)
+        db = sqlite3.connect(geo / 'national.sqlite')
+        names = sorted(n for n, in db.execute("SELECT name FROM poi WHERE cls='emergency_department'"))
+        help_points = dict(db.execute('SELECT key, value FROM meta'))['help_points']
+        db.close()
+        self.assertEqual(len(names), 2)
+        self.assertTrue(names[0].startswith('SEH 24/7 · Reinier de Graaf (Delft)'))
+        self.assertTrue(names[1].startswith("SEH niet 24/7 (overdag en 's avonds) · Franciscus Vlietland"))
+        self.assertEqual(placed, {('Reinier de Graaf', '2625AD'), ('Franciscus Vlietland', '3118JH')})
+        self.assertIn('; AEDs: OpenStreetMap', help_points)                                # the other notes stay
+        self.assertEqual(help_points.count('; SEH: '), 1)
+        report = json.loads((base / 'data' / 'build.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['counts']['seh'], 2)
+        self.assertEqual(report['sources']['files']['seh.xlsx']['title'], nl.SEH_TITLE)
 
 
 class MapBesideTheLibrary(unittest.TestCase):
