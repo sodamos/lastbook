@@ -38,7 +38,7 @@ if __name__ == '__main__':  # --data must be known before the paths below are wo
 
 import engine.paths as lastbook_paths  # noqa: E402  (data folder and program folder can differ in the packaged app)
 from engine.paths import ro_uri  # noqa: E402
-from engine import saved_pages, address_search, encyclopedias, dutch_query  # noqa: E402
+from engine import saved_pages, address_search, address_nl, encyclopedias, dutch_query  # noqa: E402
 from engine.setup import api as setup_api  # noqa: E402  (the one module that may download: only when the person asks)
 HERE = lastbook_paths.DATA  # holds derived/
 # The map's folder: the library's own derived/geo, or a map set kept beside it, such as a Dutch province built by
@@ -1470,7 +1470,13 @@ def water_places(q, limit=10, near=None):
 
 
 def places(q, limit=20, near=None):
-    if address_search.is_address_query(q):
+    if address_nl.has_index(geo_dir()):
+        # A Dutch map: 'Dorpsstraat 12 Leeuwarden' or '8911 HG 12'. No such house: the place finder still finds the
+        # street, the place or the postcode.
+        found = address_nl.find(q, geo_dir(), limit=min(limit, 8), near=near)
+        if found:
+            return found
+    elif address_search.is_address_query(q):
         return address_search.find_addresses(q, geo_dir(), limit=min(limit, 8), near=near)
     if not PLACEDB.exists():
         return []

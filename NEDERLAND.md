@@ -12,6 +12,7 @@ voor andere landen (zoals Duitsland/Berlijn). De rest van Lastbook werkt zoals a
 | Nederlands zoeken | Zoeken in het Nederlands vindt de juiste gids ("brandwond", "geen stroom", "dijkdoorbraak", "wc werkt niet"). In de (Engelse) handleidingen wordt een Nederlandse zoekvraag vertaald naar de Engelse woorden die erin staan ("brandwond op mijn hand" → "burn hand"). Dat geldt ook voor de chat en de encyclopedieën. | `engine/dutch_query.py`, `web/app.js` |
 | Noodnummers | 112, politie geen spoed (0900 8844), 113 Zelfmoordpreventie en het Nationaal Storingsnummer Gas en Stroom (0800 9009), elk met de officiële bron en de datum van controle. | `content/emergency/NL.json` |
 | Kaart per provincie | Offline kaart voor elk van de twaalf provincies (of alle in één keer): straten, water, gebouwen en hulppunten uit OpenStreetMap, alle adressen uit de BAG (Kadaster). De Waddeneilanden zitten in hun provincie (Texel in Noord-Holland, de andere vier in Fryslân), met veerhavens als hulppunt en een eigen controle per eiland. | `tools/build_region_nl.py`, `docs/REGIONS-NL.md` |
+| Adres zoeken | Het zoekveld van de kaart vindt Nederlandse adressen zoals je ze schrijft: "Dorpsstraat 12a Leeuwarden", "8911 HG 12", met de plaats of de gemeente erbij of niet, ook "Burg." voor "Burgemeester" en andersom. Alleen huizen die in de BAG staan, nooit een gok; bestaat het huis niet, dan zoekt de plaatszoeker verder (straat, plaats, postcode). | `engine/address_nl.py` |
 
 ## Starten zonder installatie
 
@@ -54,13 +55,14 @@ dag (PDOK geeft in drukke gebieden HTTP 500, de bouwer deelt die blokken dan op)
 
 ```sh
 python3 -B -m unittest app.tests.test_i18n_catalogs app.tests.test_bridge app.tests.test_topic_translations \
-  app.tests.test_dutch_query app.tests.test_emergency_numbers app.tests.test_build_region_nl app.tests.test_topic_search
+  app.tests.test_dutch_query app.tests.test_emergency_numbers app.tests.test_build_region_nl app.tests.test_address_nl \
+  app.tests.test_topic_search
 ```
 
 ## Nog niet gedaan
 
-- De app laat nog geen provinciekaart kiezen bij Inrichten, en zoekt nog niet op Nederlandse adressen; dat is hetzelfde
-  open punt als bij Berlijn (de "runtime"-kant).
+- De app laat nog geen provinciekaart kiezen bij Inrichten; dat is hetzelfde open punt als bij Berlijn (de
+  "runtime"-kant). Tot dan: `--map` of `LASTBOOK_MAP` (zie hierboven).
 - Officiële hulppunten (ziekenhuizen, huisartsenposten, AED’s) komen nu alleen uit OpenStreetMap.
 - Nederlandstalige bronnen in de bibliotheek zelf (bijvoorbeeld Denk Vooruit, Rode Kruis) vragen eerst toestemming of
   een licentiecheck per bron, en een nieuw bibliotheekpakket.
