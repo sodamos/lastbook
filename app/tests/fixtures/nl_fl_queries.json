@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "norm": "nl-1",
+  "region": "NL-FL",
+  "index_filename": "NL-FL.sqlite",
+  "description": "Six synthetic addresses in Flevoland: the streets and postcodes do not exist in the BAG (checked 27 November 2026), the places and municipalities do.",
+  "index_contract": {
+    "table": "addr(num TEXT, street TEXT, norm TEXT, city TEXT, state TEXT, zip TEXT, lat REAL, lon REAL, district TEXT)",
+    "indexes": ["addr_norm ON addr(norm, num)", "addr_zip ON addr(zip, num)"],
+    "meta": {"region": "NL-FL", "norm": "nl-1", "source": "Kadaster BAG via PDOK (Public Domain Mark 1.0)"},
+    "rules": [
+      "num is the house number as on a letter: 12, 12A, 12-2 (letter upper case, addition after a hyphen)",
+      "norm is nl-1: lower case, accents off, punctuation to spaces, a word ending in straat shortened to str",
+      "city is the BAG woonplaats, district the municipality",
+      "zip is 1234AB without the space, or empty when the BAG gives none",
+      "a title at the start of a street is tried both ways: Burg. and Burgemeester",
+      "a number without letter or addition also finds the real houses that share it, the exact one first",
+      "state is NL-FL in every row; a bare FL is Florida"
+    ]
+  },
+  "address_rows": [
+    {"id": "proef-12", "num": "12", "street": "Proefstraat", "norm": "proefstr", "city": "Almere", "state": "NL-FL", "zip": "1309ZX", "district": "Almere", "lat": 52.37, "lon": 5.21},
+    {"id": "proef-12a", "num": "12A", "street": "Proefstraat", "norm": "proefstr", "city": "Almere", "state": "NL-FL", "zip": "1309ZX", "district": "Almere", "lat": 52.3701, "lon": 5.2101},
+    {"id": "proef-12-2", "num": "12-2", "street": "Proefstraat", "norm": "proefstr", "city": "Almere", "state": "NL-FL", "zip": "1309ZX", "district": "Almere", "lat": 52.37, "lon": 5.2102},
+    {"id": "oefen-7", "num": "7", "street": "Burgemeester Oefenlaan", "norm": "burgemeester oefenlaan", "city": "Lelystad", "state": "NL-FL", "zip": "8245XZ", "district": "Lelystad", "lat": 52.51, "lon": 5.47},
+    {"id": "zeeegel-3", "num": "3", "street": "Zeeëgelstraat", "norm": "zeeegelstr", "city": "Ens", "state": "NL-FL", "zip": "8307XZ", "district": "Noordoostpolder", "lat": 52.64, "lon": 5.83},
+    {"id": "zeeegel-3-ts", "num": "3-ts", "street": "Zeeëgelstraat", "norm": "zeeegelstr", "city": "Ens", "state": "NL-FL", "zip": "", "district": "Noordoostpolder", "lat": 52.6401, "lon": 5.8301}
+  ],
+  "normalization_examples": [
+    {"input": "Proefstraat", "expected": "proefstr"},
+    {"input": "Zeeëgelstraat", "expected": "zeeegelstr"},
+    {"input": "Burg. Oefenlaan", "expected": "burg oefenlaan"},
+    {"input": "'s-Gravenhage", "expected": "s gravenhage"},
+    {"input": "Ruïnelaan", "expected": "ruinelaan"}
+  ],
+  "queries": [
+    {"form": "street-first", "query": "Proefstraat 12A, 1309 ZX Almere", "expected_fixture_ids": ["proef-12a"]},
+    {"form": "street-first", "query": "proefstr 12a almere", "expected_fixture_ids": ["proef-12a"]},
+    {"form": "street-first", "query": "Proefstraat 12 a", "expected_fixture_ids": ["proef-12a"]},
+    {"form": "street-first", "query": "Proefstraat 12", "expected_fixture_ids": ["proef-12", "proef-12a", "proef-12-2"]},
+    {"form": "street-first", "query": "Proefstraat 12-2", "expected_fixture_ids": ["proef-12-2"]},
+    {"form": "street-first", "query": "Burg. Oefenlaan 7, Lelystad", "expected_fixture_ids": ["oefen-7"]},
+    {"form": "street-first", "query": "Zeeegelstraat 3 Ens", "expected_fixture_ids": ["zeeegel-3", "zeeegel-3-ts"]},
+    {"form": "street-first", "query": "Zeeëgelstraat 3-ts", "expected_fixture_ids": ["zeeegel-3-ts"]},
+    {"form": "postcode-first", "query": "1309 ZX 12A", "expected_fixture_ids": ["proef-12a"]},
+    {"form": "postcode-first", "query": "1309zx12a", "expected_fixture_ids": ["proef-12a"]},
+    {"form": "postcode-first", "query": "1309 ZX 12", "expected_fixture_ids": ["proef-12", "proef-12a", "proef-12-2"]},
+    {"form": "postcode-first", "query": "8245 XZ 7", "expected_fixture_ids": ["oefen-7"]},
+    {"form": "postcode-first", "query": "8307 XZ 3", "expected_fixture_ids": ["zeeegel-3"]},
+    {"form": "no-house", "query": "Proefstraat 14", "expected_fixture_ids": []},
+    {"form": "no-house", "query": "Proefstraat 12B", "expected_fixture_ids": []},
+    {"form": "no-house", "query": "1309 ZX 99", "expected_fixture_ids": []},
+    {"form": "no-house", "query": "Oefenlaan 7 Almere", "expected_fixture_ids": []}
+  ],
+  "display": {"name": "street + space + num", "detail": "postcode with its space, then the place, then the municipality in brackets when it differs: '8307 XZ Ens (Noordoostpolder)'"}
+}
