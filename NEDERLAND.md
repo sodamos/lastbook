@@ -11,7 +11,7 @@ voor andere landen (zoals Duitsland/Berlijn). De rest van Lastbook werkt zoals a
 | Nederlandse gidsen | Alle 14 gidsen (titels, situaties, waarschuwingen, leerroutes) vertaald. De bronpagina’s zelf blijven Engels. Amerikaanse nummers en eenheden staan erbij met de Nederlandse tegenhanger (112, °C, meters). | `content/topics-i18n/nl/` |
 | Nederlands zoeken | Zoeken in het Nederlands vindt de juiste gids ("brandwond", "geen stroom", "dijkdoorbraak", "wc werkt niet"). In de (Engelse) handleidingen wordt een Nederlandse zoekvraag vertaald naar de Engelse woorden die erin staan ("brandwond op mijn hand" → "burn hand"). Dat geldt ook voor de chat en de encyclopedieën. | `engine/dutch_query.py`, `web/app.js` |
 | Noodnummers | 112, politie geen spoed (0900 8844), 113 Zelfmoordpreventie en het Nationaal Storingsnummer Gas en Stroom (0800 9009), elk met de officiële bron en de datum van controle. | `content/emergency/NL.json` |
-| Kaart per provincie | Offline kaart voor elk van de twaalf provincies (of alle in één keer): straten, water, gebouwen en hulppunten uit OpenStreetMap, alle adressen uit de BAG (Kadaster). De Waddeneilanden zitten in hun provincie (Texel in Noord-Holland, de andere vier in Fryslân), met veerhavens als hulppunt en een eigen controle per eiland. | `tools/build_region_nl.py`, `docs/REGIONS-NL.md` |
+| Kaart per provincie | Offline kaart voor elk van de twaalf provincies (of alle in één keer): straten, water, gebouwen en hulppunten uit OpenStreetMap, alle adressen uit de BAG (Kadaster). De Waddeneilanden zitten in hun provincie (Texel in Noord-Holland, de andere vier in Fryslân), met veerhavens als hulppunt en een eigen controle per eiland. | `tools/build_region_nl.py`, `docs/MAP-NL.md` |
 | Adres zoeken | Het zoekveld van de kaart vindt Nederlandse adressen zoals je ze schrijft: "Dorpsstraat 12a Leeuwarden", "8911 HG 12", met de plaats of de gemeente erbij of niet, ook "Burg." voor "Burgemeester" en andersom. Alleen huizen die in de BAG staan, nooit een gok; bestaat het huis niet, dan zoekt de plaatszoeker verder (straat, plaats, postcode). | `engine/address_nl.py` |
 
 ## Starten zonder installatie
@@ -58,7 +58,7 @@ Waddeneilanden: Texel zit in `NL-NH`; Vlieland, Terschelling, Ameland en Schierm
 per eiland straten, adressen, de gemeente in de plaatszoeker en een voorbeeldadres; anders faalt de bouw.
 
 De eerste volledige bouw (26 november 2026): alle twaalf provincies geslaagd, samen 10.798.639 adressen en ongeveer
-4,5 GB; per provincie de cijfers in [docs/REGIONS-NL.md](docs/REGIONS-NL.md). Ophalen duurde het grootste deel van een
+4,5 GB; per provincie de cijfers in [docs/MAP-NL.md](docs/MAP-NL.md). Ophalen duurde het grootste deel van een
 dag (PDOK geeft in drukke gebieden HTTP 500, de bouwer deelt die blokken dan op); bouwen ongeveer acht minuten.
 
 ## Tests

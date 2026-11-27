@@ -13,7 +13,7 @@ Rottumeroog and Rottumerplaat (uninhabited, no addresses) in NL-GR. check makes 
 streets and addresses (ISLANDS below).
 
 Everything goes under derived/regions/NL-<code>/, so no other map set is touched; the BAG tiles and the province boxes
-are kept once for all provinces under derived/regions/NL-shared/, so a border area is asked for only once. Plan, sources and what this build lacks: docs/REGIONS-NL.md. It follows tools/build_region_de_be.py and runs
+are kept once for all provinces under derived/regions/NL-shared/, so a border area is asked for only once. Plan, sources and what this build lacks: docs/MAP-NL.md. It follows tools/build_region_de_be.py and runs
 tools/build_map.py unchanged; it imports nothing from engine/ or server.py. Searching the address index the Dutch way
 (scheme nl-1 below) is runtime work, the same open question as for Berlin (#79, #31).
 
