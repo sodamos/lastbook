@@ -5,6 +5,7 @@ No network: the BAG and boundary services are stand-ins that answer as PDOK does
 small GeoPackage written here, so whole builds and their checks run on made-up provinces: Zuid-Holland around Delft,
 and Fryslân with Leeuwarden and the four Frisian Wadden islands."""
 import gzip
+import hashlib
 import json
 import sqlite3
 import struct
@@ -193,7 +194,8 @@ class Boxes(unittest.TestCase):
         answer = {'timeStamp': '2026-11-25T10:00:00Z', 'features': [
             {'properties': {'naam': 'Fryslân', 'code': '21'}, 'geometry': {'type': 'MultiPolygon', 'coordinates': [mainland, vlieland]}},
             {'properties': {'naam': 'Unknown', 'code': 'PV24'}, 'geometry': {'type': 'Polygon', 'coordinates': mainland}}]}
-        with mock.patch.object(nl, 'get_json', lambda url: answer):
+        raw = json.dumps(answer).encode('utf-8')
+        with mock.patch.object(nl, 'fetch_bytes', lambda url, **kw: (raw, {})):
             nl.fetch_boxes()
         saved = json.loads((nl.SHARED / 'provinces.json').read_text(encoding='utf-8'))
         self.assertEqual(saved['boxes']['FR'], [4.87, 52.8, 6.4, 53.3])
@@ -202,6 +204,10 @@ class Boxes(unittest.TestCase):
         self.assertEqual(saved['licence'], nl.BOUNDARY_LICENCE)
         outlines = json.loads((nl.SHARED / 'outlines.json').read_text(encoding='utf-8'))
         self.assertEqual(outlines['outlines']['FR']['coordinates'], [mainland, vlieland])     # kept for labelling places
+        self.assertEqual((nl.SHARED / 'boundaries-answer.json').read_bytes(), raw)          # the answer as it came
+        self.assertEqual((outlines['answer']['sha256'], outlines['answer']['features']), (hashlib.sha256(raw).hexdigest(), 2))
+        receipt = nl.boundary_receipt()
+        self.assertEqual((receipt['served_at'], receipt['answer']['bytes']), ('2026-11-25T10:00:00Z', len(raw)))
         nl.select('FR')
         self.assertEqual(nl.BBOX, (4.86, 52.79, 6.41, 53.31))                 # with the margin
         nl.select('GR')
@@ -311,6 +317,19 @@ class SplitOnServerErrors(unittest.TestCase):
             nl.fetch_tile(self.CELL)
         self.assertEqual(sorted(r['number'] for r in self.rows()), sorted(str(i) for i in range(36)))   # all, once
         self.assertFalse(nl.holes_path(self.CELL).exists())
+        receipt = json.loads(nl.receipt_path(self.CELL).read_text(encoding='utf-8'))
+        self.assertEqual((receipt['served_at'], receipt['rows'], receipt['holes']), ('2026-11-26T06:00:00Z', 36, []))
+        self.assertEqual(receipt['sha256'], nl.de.sha256(nl.tile_path(self.CELL)))
+        self.assertEqual(receipt['request'], nl.box_request(nl.tile_box(self.CELL)))
+        self.assertEqual(nl.cell_receipt(self.CELL), receipt)                         # still matches: kept as it is
+
+    def test_a_cell_saved_before_receipts_gets_one_without_a_served_time(self):
+        nl.tile_path(self.CELL).parent.mkdir(parents=True)
+        with gzip.open(nl.tile_path(self.CELL), 'wt', encoding='utf-8') as out:
+            out.writelines(json.dumps({'id': str(i)}) + '\n' for i in range(5))
+        receipt = nl.cell_receipt(self.CELL)
+        self.assertEqual((receipt['served_at'], receipt['rows']), (None, 5))
+        self.assertTrue(nl.receipt_path(self.CELL).is_file())
 
     def test_one_bad_spot_is_a_hole_that_the_next_fetch_fills(self):
         bad = self.points[14]['geometry']['coordinates']
@@ -546,8 +565,9 @@ class WholeBuild(unittest.TestCase):
         self.assertTrue(any('island Schiermonnikoog' in f for f in failures), failures)
         self.assertTrue(any('Heereweg 8' in f for f in failures), failures)
 
-    def brabant(self, places):
-        """Noord-Brabant around 's-Hertogenbosch, with its sample addresses, help points and the given OSM places."""
+    def brabant(self, places, extra=()):
+        """Noord-Brabant around 's-Hertogenbosch, with its sample addresses, help points and the given OSM places;
+        a pharmacy stands on the Belgian ground at Baarle (OUTLINES.BRABANT's hole)."""
         samples = nl.SAMPLE_ADDRESSES['NB']
         features = [feature(i, street=street, number=number.rstrip('F'), letter='F' if number.endswith('F') else None,
                             code=code, place=place, prov='NB', prov_name='Noord-Brabant', lon=5.30, lat=51.69)
@@ -556,8 +576,10 @@ class WholeBuild(unittest.TestCase):
                              prov_name='Noord-Brabant', lon=5.30 + i * 1e-5, lat=51.69) for i in range(10, 130)]
         features += [feature(i, street='Dorpsstraat', number=str(i), code='5241AA', place='Rosmalen', town="'s-Hertogenbosch",
                              prov='NB', prov_name='Noord-Brabant', lon=5.36, lat=51.71 - i * 1e-5) for i in range(200, 210)]
+        features += list(extra)
         pois = [('hospital', 'Jeroen Bosch Ziekenhuis', 5.29, 51.70), ('pharmacy', 'Apotheek', 5.30, 51.69),
-                ('fire_station', 'Brandweer', 5.31, 51.69), ('police', 'Politie', 5.30, 51.68)]
+                ('fire_station', 'Brandweer', 5.31, 51.69), ('police', 'Politie', 5.30, 51.68),
+                ('pharmacy', 'Apotheek Brughmans', 4.932, 51.441)]
         return self.build('NB', features, [(5.30 + k * 1e-4, 51.69) for k in range(30)], pois, places)
 
     def test_an_exclave_is_labelled_outside_the_province(self):
@@ -572,15 +594,74 @@ class WholeBuild(unittest.TestCase):
                          [('Noord-Brabant (OpenStreetMap)',)])
         places.close()
         report = json.loads((geo.parents[1] / 'build.json').read_text(encoding='utf-8'))
-        self.assertEqual(report['counts']['osm_places_outside'], {'other_province': 0, 'outside_provinces': 1})
+        self.assertEqual(report['counts']['osm_places_outside'], {'other_province': 0, 'outside_provinces': 2})
+        enclave = report['counts']['exclaves']['Baarle-Hertog']
+        self.assertEqual((enclave['country'], enclave['bag_addresses'], enclave['aeds']), ('Belgium', 0, 0))
+        self.assertEqual(enclave['help_points'], {'pharmacy': 1})                   # kept: still a pharmacy
+        self.assertEqual(enclave['place_finder'], {'osm_labelled_outside': 2, 'osm_labelled_as_province': 0,
+                                                   'osm_other': 0, 'bag': 0})
+        cells = report['sources']['files']['bag']['cell_receipts']
+        self.assertEqual(cells['kept'], report['counts']['addresses'])            # the receipts add up to the index
+        listed = json.loads((geo.parents[1] / 'bag-cells.json').read_text(encoding='utf-8'))['cells']
+        self.assertEqual(sum(c['kept'] for c in listed), cells['kept'])
+        self.assertTrue(all(len(c['sha256']) == 64 and c['request'].startswith(nl.BAG_API) for c in listed))
         cut = report['sources']['files']
         self.assertEqual((cut['bag']['cut']['value'], cut['bag']['cut']['as_written']), ('NB', 'NB'))
         self.assertIn('official outlines', cut['osm.gpkg.zip']['cut']['places_labelled_by'])
+
+    def test_a_bag_address_on_the_other_countrys_ground_fails_the_check(self):
+        """The BAG holds Dutch addresses only, so one on Belgian ground means the outline or the cut is wrong."""
+        self.outlines = {'NB': Outlines.BRABANT, 'ZE': Outlines.ZEELAND}
+        failures, _ = self.brabant([('town', "'s-Hertogenbosch", 5.30, 51.69), ('village', 'Baarle-Hertog', 4.925, 51.445)],
+                                   [feature(900, street='Molenstraat', number='1', code='5111AA', place='Baarle-Nassau',
+                                            prov='NB', prov_name='Noord-Brabant', lon=4.925, lat=51.446)])
+        self.assertTrue(any("no BAG address on Belgium's ground (1)" in f for f in failures), failures)
 
     def test_an_exclave_labelled_as_the_province_fails_the_check(self):
         """Without the official outlines every OSM place is labelled Noord-Brabant, Baarle-Hertog too: check says so."""
         failures, _ = self.brabant([('town', "'s-Hertogenbosch", 5.30, 51.69), ('village', 'Baarle-Hertog', 4.925, 51.445)])
         self.assertTrue(any('exclave Baarle-Hertog' in f for f in failures), failures)
+
+    def test_the_receipts_step_records_a_built_map_in_place(self):
+        """receipts on a map built before receipts were kept: the boundary answer and Geofabrik's outline are fetched
+        (stand-ins here), every BAG cell gets its receipt, and check passes on the result."""
+        features = [feature(i, number=str(i), lon=4.3700 + i * 1e-5) for i in range(1, 200)]
+        features += [feature(1000, street='Rotterdamseweg', number='374', letter='A', code='2629HG'),
+                     feature(1001, street='Lorentzweg', number='1', code='2628CJ'), feature(1002, number='4'),
+                     feature(1003, street='Burg. Jansenstraat', number='7', code='2611AA', place='Den Haag')]
+        pois = [('hospital', 'Reinier de Graaf', 4.36, 52.01), ('pharmacy', 'Apotheek Delft', 4.358, 52.012),
+                ('fire_station', 'Kazerne Delft', 4.355, 52.0), ('police', 'Politie Delft', 4.357, 52.008)]
+        failures, geo = self.build('ZH', features, [(4.37 + i * 1e-4, 52.0) for i in range(30)], pois,
+                                   [('town', 'Delft', 4.357, 52.011)])
+        self.assertEqual(failures, [])
+        base = geo.parents[2]
+        holland = {'type': 'Polygon', 'coordinates': [[[4.0, 51.9], [4.5, 51.9], [4.5, 52.1], [4.0, 52.1], [4.0, 51.9]]]}
+        boundary = json.dumps({'timeStamp': '2026-11-28T10:00:00Z', 'features': [
+            {'properties': {'naam': nl.PROVINCES[c][0], 'code': nl.PROVINCES[c][2]}, 'geometry': holland}
+            for c in nl.PROVINCES]}).encode('utf-8')
+        poly = b'zuid-holland\n1\n 4.0 51.9\nEND\nEND\n'
+
+        def answer(url, **kw):
+            return (poly, {'Last-Modified': 'Tue, 24 Nov 2026 21:30:00 GMT'}) if url.endswith('.poly') else (boundary, {})
+        with mock.patch.object(nl, 'SHARED', base.parent / 'NL-shared'):
+            nl.select('ZH')
+            with mock.patch.multiple(nl, BASE=base, SOURCE=base / 'source', DATA=base / 'data', MINIMUM=self.LOW,
+                                     log=lambda *a: None, fetch_bytes=answer):
+                nl.receipts()
+                failures = nl.check(base / 'data')
+        self.assertEqual(failures, [])
+        report = json.loads((base / 'data' / 'build.json').read_text(encoding='utf-8'))
+        files = report['sources']['files']
+        self.assertEqual(files['bag']['cell_receipts']['kept'], report['counts']['addresses'])
+        self.assertEqual(files['bag']['cell_receipts']['cells_without_served_time'], files['bag']['cell_receipts']['cells'])
+        self.assertEqual(report['outputs']['bag-cells.json']['sha256'], nl.de.sha256(base / 'data' / 'bag-cells.json'))
+        self.assertEqual(files['boundary']['answer']['sha256'], hashlib.sha256(boundary).hexdigest())
+        self.assertEqual(files['boundary']['served_at'], '2026-11-28T10:00:00Z')
+        outline = files['osm.gpkg.zip']['cut']['outline']
+        self.assertEqual((outline['url'], outline['sha256'], outline['last_modified']),
+                         ('https://download.geofabrik.de/europe/netherlands/zuid-holland.poly',
+                          hashlib.sha256(poly).hexdigest(), 'Tue, 24 Nov 2026 21:30:00 GMT'))
+        self.assertEqual((base / 'source' / 'osm.poly').read_bytes(), poly)
 
     def test_the_outline_step_labels_a_built_map_in_place(self):
         """A province built before the outlines were fetched is labelled afterwards without a rebuild; build.json and
@@ -747,6 +828,11 @@ class AEDs(unittest.TestCase):
         self.assertEqual(len(saved['points']), 3)
         self.assertEqual(again['points'], saved['points'])
         self.assertTrue((self.base / 'source' / 'aeds.json').is_file())
+        raw = (self.base / 'source' / 'aeds-answer.json').read_bytes()             # the answer as it came
+        self.assertEqual(json.loads(raw), self.ANSWER)
+        self.assertEqual(saved['answer'], {'file': 'source/aeds-answer.json', 'bytes': len(raw),
+                                           'sha256': hashlib.sha256(raw).hexdigest(), 'elements': 5})
+        self.assertEqual(nl.aed_source(saved)['answer'], saved['answer'])
 
     def test_a_failing_instance_hands_over_to_the_next(self):
         down = urllib.error.HTTPError(nl.OVERPASS[0], 502, 'Bad Gateway', {}, None)

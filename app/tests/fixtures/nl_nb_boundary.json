@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "region": "NL-NB",
+  "what": "One place on either side of the border at Baarle, where Belgian enclaves (Baarle-Hertog) lie inside Noord-Brabant (Baarle-Nassau): the town halls of both, about 450 m apart. Each must be labelled as the place finder labels an OpenStreetMap row.",
+  "outline_note": "Synthetic and simplified, not Kadaster data: Noord-Brabant as a rectangle with one hole for a Belgian enclave. The real outlines (Kadaster BRK Bestuurlijke Gebieden, provinciegebied) have 22 such holes, some with Dutch ground in them again.",
+  "outlines": {
+    "NB": {"type": "MultiPolygon", "coordinates": [[
+      [[4.5, 51.3], [5.5, 51.3], [5.5, 51.8], [4.5, 51.8], [4.5, 51.3]],
+      [[4.92, 51.436], [4.929, 51.436], [4.929, 51.442], [4.92, 51.442], [4.92, 51.436]]
+    ]]}
+  },
+  "places": [
+    {"name": "Gemeentehuis Baarle-Nassau", "kind": "town hall", "lon": 4.9310851, "lat": 51.4434559, "side": "Netherlands",
+     "expected_detail": "Noord-Brabant (OpenStreetMap)"},
+    {"name": "Gemeentehuis Baarle-Hertog", "kind": "town hall", "lon": 4.9270747, "lat": 51.4400898, "side": "Belgium",
+     "expected_detail": "outside the Dutch provinces (OpenStreetMap)"}
+  ],
+  "points_from": "OpenStreetMap (ODbL), as in the trial build of 26 November 2026",
+  "checked_against_official": {
+    "dataset": "Kadaster BRK Bestuurlijke Gebieden, provinciegebied (CC BY 4.0)",
+    "served_at": "2026-11-28T16:04:56Z",
+    "checked": "2026-11-28",
+    "same_labels": true
+  }
+}

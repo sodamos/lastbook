@@ -129,6 +129,41 @@ python3 tools/build_region_nl.py outline --province all
 python3 tools/build_region_nl.py merge --province all     # the whole-country map takes the new labels
 ```
 
+Each layer is counted on the Belgian ground at Baarle (ground in the box of `EXCLAVES` that no Dutch province's outline
+holds; a map feature by the centre of its box), and written to `build.json` under `counts.exclaves`. check wants no BAG
+address there (the BAG holds Dutch addresses only), no AED (Overpass cuts by the OSM boundary of the province) and no
+OpenStreetMap place labelled Noord-Brabant; roads, buildings, water and help points are reported, kept as the extract
+has them. Measured on 28 November 2026: 0 BAG addresses, 0 AEDs, 12 place-finder rows all labelled "outside the Dutch
+provinces", and 315 roads, 2,070 buildings and 16 help points (among them a pharmacy and the town hall of
+Baarle-Hertog). [app/tests/fixtures/nl_nb_boundary.json](../app/tests/fixtures/nl_nb_boundary.json) is the small
+example: the two town halls, 450 m apart on either side of the border, with the label each must get.
+
+## Receipts: what each build was made from
+
+So that another person can check a build, each source is kept as it came, with what was asked, when it was served,
+how many rows it had and its SHA-256, and `build.json` points to it:
+
+| Source | Kept as | Recorded |
+|---|---|---|
+| Geofabrik extract | `source/osm.gpkg.zip` | URL, data date, size, SHA-256 |
+| Geofabrik's outline of the extract (the boundary OSM was cut by) | `source/osm.poly` | URL, Last-Modified, size, SHA-256 |
+| BAG, per 0.05° cell | `NL-shared/bag-tiles/<cell>.ndjson.gz` (the fields build reads) and `<cell>.receipt.json` | request, served time, rows, boxes asked after HTTP 500s, holes, size, SHA-256; per province in `data/bag-cells.json` with the rows kept, which add up to the address index (check) |
+| Official boundaries | `NL-shared/boundaries-answer.json` (the answer) and `outlines.json` | request, served time, features, size and SHA-256 of both |
+| AEDs | `source/aeds-answer.json` (the Overpass answer) and `source/aeds.json` (the list read from it) | instance, query, OSM data date, elements, points, size and SHA-256 of both |
+| RIVM emergency departments | `NL-shared/seh.zip` and `seh.xlsx` | URL, title, locations, size and SHA-256 of both |
+
+A cell fetched before receipts were kept gets one without a served time. For a map already built:
+
+```sh
+python3 tools/build_region_nl.py aed --province all --refresh   # asks Overpass again, so its answer is kept
+python3 tools/build_region_nl.py receipts --province all        # boundaries, Geofabrik's outline, cell receipts, exclaves
+python3 tools/build_region_nl.py merge --province all
+python3 tools/build_region_nl.py check --province all
+```
+
+[app/tests/test_us_map_unchanged.py](../app/tests/test_us_map_unchanged.py) checks that a library with a US state map
+opens and searches as before with this fork's changes in place (`--map`, the Dutch index tried first, `geo_dir()`).
+
 ## How addresses are written
 
 `<street> <number><letter>-<addition>, <postcode> <place>`: "Rotterdamseweg 374A, 2629 HG Delft". Postcodes are four

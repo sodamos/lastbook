@@ -65,6 +65,17 @@ python3 tools/build_region_nl.py outline --province all
 python3 tools/build_region_nl.py merge --province all
 ```
 
+Bonnetjes, zodat iemand anders je bouw kan narekenen: elk opgehaald bestand en elk antwoord van PDOK en Overpass wordt
+bewaard met wat er gevraagd is, wanneer, hoeveel rijen en een SHA-256 (uitleg en tabel in [docs/MAP-NL.md](docs/MAP-NL.md)).
+Voor kaarten die al gebouwd zijn:
+
+```sh
+python3 tools/build_region_nl.py aed --province all --refresh
+python3 tools/build_region_nl.py receipts --province all
+python3 tools/build_region_nl.py merge --province all
+python3 tools/build_region_nl.py check --province all
+```
+
 Waddeneilanden: Texel zit in `NL-NH`; Vlieland, Terschelling, Ameland en Schiermonnikoog in `NL-FR`. De controle eist
 per eiland straten, adressen, de gemeente in de plaatszoeker en een voorbeeldadres; anders faalt de bouw.
 
