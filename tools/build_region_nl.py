@@ -996,6 +996,16 @@ def refresh_report(data, counts=None, source=None, changed=('national.sqlite',))
     """After a map file was changed in place: build.json's counts, its sources (each entry updated, not replaced) and
     the changed files' size and hash, and map-set.json's sizes, follow."""
     files = [data / 'derived' / 'geo' / name for name in changed]
+    map_set = data / 'map-set.json'
+    if map_set.exists():                    # first, so build.json below records map-set.json as it now is
+        listed = json.loads(map_set.read_text(encoding='utf-8'))
+        for f in files:
+            name = f.relative_to(data).as_posix()
+            if name in listed.get('files', {}):
+                listed['files'][name] = f.stat().st_size
+        listed['bytes'] = sum(listed.get('files', {}).values())
+        map_set.write_text(json.dumps(listed, indent=1), encoding='utf-8')
+        files.append(map_set)
     report_path = data / 'build.json'
     if report_path.exists():
         report = json.loads(report_path.read_text(encoding='utf-8'))
@@ -1006,15 +1016,6 @@ def refresh_report(data, counts=None, source=None, changed=('national.sqlite',))
         for f in files:
             report.setdefault('outputs', {})[f.relative_to(data).as_posix()] = {'bytes': f.stat().st_size, 'sha256': de.sha256(f)}
         report_path.write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding='utf-8')
-    map_set = data / 'map-set.json'
-    if map_set.exists():
-        listed = json.loads(map_set.read_text(encoding='utf-8'))
-        for f in files:
-            name = f.relative_to(data).as_posix()
-            if name in listed.get('files', {}):
-                listed['files'][name] = f.stat().st_size
-        listed['bytes'] = sum(listed.get('files', {}).values())
-        map_set.write_text(json.dumps(listed, indent=1), encoding='utf-8')
 
 
 def seh():

@@ -618,6 +618,30 @@ class WholeBuild(unittest.TestCase):
         self.assertEqual(report['sources']['files']['bag']['served_at'], '2026-11-25T10:00:00Z')   # kept, not replaced
 
 
+class ReportAfterAnInPlaceChange(unittest.TestCase):
+    """aed, seh and outline change a built file in place; build.json must then hold the new size and SHA-256 of that
+    file and of map-set.json, which lists its size, or check fails on the next run (as it did on 28 November)."""
+
+    def test_build_json_follows_the_changed_file_and_map_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            geo = data / 'derived' / 'geo'
+            geo.mkdir(parents=True)
+            places = geo / 'places.sqlite'
+            places.write_bytes(b'a' * 100)
+            (data / 'map-set.json').write_text(json.dumps({'name': 'NL-ZH', 'files': {'derived/geo/places.sqlite': 100},
+                                                           'bytes': 100}, indent=1), encoding='utf-8')
+            (data / 'build.json').write_text(json.dumps({'counts': {}, 'sources': {'files': {'bag': {'rows': 3}}},
+                                                         'outputs': {}}), encoding='utf-8')
+            places.write_bytes(b'b' * 250)                              # the file changed size in place
+            nl.refresh_report(data, {'x': 1}, {'bag': {'cut': {'field': 'provincie_afkorting'}}}, changed=('places.sqlite',))
+            report = json.loads((data / 'build.json').read_text(encoding='utf-8'))
+            listed = json.loads((data / 'map-set.json').read_text(encoding='utf-8'))
+            self.assertEqual((listed['files']['derived/geo/places.sqlite'], listed['bytes']), (250, 250))
+            for name, path in (('derived/geo/places.sqlite', places), ('map-set.json', data / 'map-set.json')):
+                self.assertEqual(report['outputs'][name], {'bytes': path.stat().st_size, 'sha256': nl.de.sha256(path)})
+            self.assertEqual(report['sources']['files']['bag'], {'rows': 3, 'cut': {'field': 'provincie_afkorting'}})
+
 class Outlines(unittest.TestCase):
     """The official outlines decide which province an OpenStreetMap place is in: Geofabrik's Noord-Brabant takes in
     Baarle-Hertog's Belgian enclaves, which the province's outline leaves out as holes (with Dutch ground in them)."""
