@@ -134,7 +134,7 @@ holds; a map feature by the centre of its box), and written to `build.json` unde
 address there (the BAG holds Dutch addresses only), no AED (Overpass cuts by the OSM boundary of the province) and no
 OpenStreetMap place labelled Noord-Brabant; roads, buildings, water and help points are reported, kept as the extract
 has them. Measured on 28 November 2026: 0 BAG addresses, 0 AEDs, 12 place-finder rows all labelled "outside the Dutch
-provinces", and 315 roads, 2,070 buildings and 16 help points (among them a pharmacy and the town hall of
+provinces", and 315 roads, 2,070 buildings and 15 help points (among them a pharmacy and the town hall of
 Baarle-Hertog). [app/tests/fixtures/nl_nb_boundary.json](../app/tests/fixtures/nl_nb_boundary.json) is the small
 example: the two town halls, 450 m apart on either side of the border, with the label each must get.
 
