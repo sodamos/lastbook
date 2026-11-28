@@ -23,8 +23,13 @@ Sources (dates and checksums end up in derived/regions/NL-<code>/data/build.json
   - Basisregistratie Adressen en Gebouwen (BAG), Kadaster, through the PDOK OGC API Features service (collection
     "adres"): every address with street, house number, letter, addition, postcode, place and municipality. Public
     domain (the service states the Public Domain Mark 1.0; the BAG downloads CC0 1.0). No attribution duty.
-  - The provinces' boundaries (Kadaster, BRK Bestuurlijke Gebieden via PDOK, CC BY 4.0), used only to know which box
-    of the BAG to ask for, so an island far out in the Wadden Sea is not missed. Nothing of them ships.
+  - The provinces' boundaries (Kadaster, BRK Bestuurlijke Gebieden via PDOK, CC BY 4.0), used to know which box of the
+    BAG to ask for, so an island far out in the Wadden Sea is not missed, and to label OpenStreetMap places by the
+    province that really holds them: Geofabrik's extract for Noord-Brabant takes in Baarle-Hertog's Belgian enclaves.
+    Nothing of them ships.
+
+  python3 tools/build_region_nl.py outline --province all   # labels a built map's OpenStreetMap places by the official
+                                                            # outlines and records how each source was cut; no rebuild
 
 The fetch step needs the network and resumes where it stopped (each finished tile of the BAG is kept); build and check
 do not. Python 3.9+ standard library only.
@@ -80,9 +85,17 @@ ISLANDS = {
     'FR': [('Vlieland', (4.86, 53.21, 5.13, 53.32)), ('Terschelling', (5.10, 53.33, 5.61, 53.47)),
            ('Ameland', (5.59, 53.41, 5.95, 53.51)), ('Schiermonnikoog', (6.07, 53.45, 6.35, 53.52))],
 }
+# Another country's ground inside a province: Geofabrik's extract takes it in, the BAG does not (it holds Dutch
+# addresses only). check wants each place named here labelled as outside the province in the place finder, so a
+# Belgian village is not offered as one in Noord-Brabant. (place as OpenStreetMap names it, country)
+EXCLAVES = {
+    'NB': [('Baarle-Hertog', 'Belgium')],
+}
 SHARED = ROOT / 'derived' / 'regions' / 'NL-shared'
 BOUNDARIES = 'https://api.pdok.nl/kadaster/brk-bestuurlijke-gebieden/ogc/v1/collections/provinciegebied/items'
 BOUNDARY_LICENCE = 'CC BY 4.0 (Kadaster, BRK Bestuurlijke Gebieden)'
+OUTSIDE = 'outside the Dutch provinces'   # how the place finder labels an OpenStreetMap place that no province holds
+OUTLINE_BAND = 0.01  # degrees: an outline's edges are kept by band of latitude, so a point test reads a few hundred
 MARGIN = 0.01        # degrees around a province's official box
 POINT_MARGIN = 0.15  # degrees: points of the extract further out than this from the box are another map's
 GEOFABRIK = 'https://download.geofabrik.de/europe/netherlands/{slug}-latest-free.gpkg.zip'
@@ -248,25 +261,141 @@ def geometry_box(geometry):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def fetch_boxes():
-    """Each province's box from its official boundary, kept in NL-shared/provinces.json. A province the service does not
-    answer for keeps its fallback box, and the file says so."""
-    SHARED.mkdir(parents=True, exist_ok=True)
+def boundaries():
+    """(the service's answer, {code: GeoJSON geometry}) for the provinces' official boundaries."""
     page = get_json(BOUNDARIES + '?' + urllib.parse.urlencode({'f': 'json', 'limit': 50}))
     by_name = {fold(v[0]): k for k, v in PROVINCES.items()}
     by_cbs = {v[2]: k for k, v in PROVINCES.items()}
-    boxes = {}
+    found = {}
     for f in page.get('features', []):
         p = f.get('properties') or {}
         code = by_name.get(fold(p.get('naam'))) or by_cbs.get(str(p.get('code') or '').lstrip('PV'))
         if code and f.get('geometry'):
-            boxes[code] = [round(v, 5) for v in geometry_box(f['geometry'])]
+            found[code] = f['geometry']
+    return page, found
+
+
+def save_outlines(page, found):
+    """The outlines themselves, kept in NL-shared/outlines.json for labelling places (they do not ship)."""
+    (SHARED / 'outlines.json').write_text(json.dumps({
+        'source': BOUNDARIES, 'licence': BOUNDARY_LICENCE, 'served_at': page.get('timeStamp'),
+        'fetched': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+        'outlines': found}, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    OUTLINES.clear()
+
+
+def fetch_outlines():
+    """The official outlines on their own, without touching the boxes the BAG cells were fetched by."""
+    SHARED.mkdir(parents=True, exist_ok=True)
+    page, found = boundaries()
+    if sorted(found) != sorted(PROVINCES):
+        raise SystemExit(f'province outlines: the service answered for {len(found)} of 12 provinces; try again later')
+    save_outlines(page, found)
+    log('province outlines:', len(found), 'official')
+
+
+def fetch_boxes():
+    """Each province's box from its official boundary, kept in NL-shared/provinces.json, and the outlines in
+    NL-shared/outlines.json. A province the service does not answer for keeps its fallback box, and the file says so."""
+    SHARED.mkdir(parents=True, exist_ok=True)
+    page, found = boundaries()
+    boxes = {code: [round(v, 5) for v in geometry_box(geometry)] for code, geometry in found.items()}
+    if found:
+        save_outlines(page, found)
     missing = sorted(set(PROVINCES) - set(boxes))
     (SHARED / 'provinces.json').write_text(json.dumps({
         'source': BOUNDARIES, 'licence': BOUNDARY_LICENCE, 'served_at': page.get('timeStamp'),
         'fetched': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
         'boxes': boxes, 'fallback_for': missing}, indent=1, ensure_ascii=False), encoding='utf-8')
     log('province boxes:', len(boxes), 'official' + (f', fallback for {", ".join(missing)}' if missing else ''))
+
+
+class Outline:
+    """A province's official outline, for telling whether a point lies in it. The even-odd rule over all its rings
+    takes in the islands and leaves out the holes, such as Baarle-Hertog's Belgian enclaves in Baarle-Nassau. The
+    edges are kept by band of latitude, so a test reads only the edges a ray at that latitude can cross."""
+
+    def __init__(self, geometry):
+        self.box = geometry_box(geometry)
+        polygons = geometry['coordinates'] if geometry['type'] == 'MultiPolygon' else [geometry['coordinates']]
+        self.bands = {}
+        for polygon in polygons:
+            for ring in polygon:
+                for (x1, y1, *_), (x2, y2, *_) in zip(ring, ring[1:] + ring[:1]):
+                    if y1 == y2:
+                        continue
+                    edge = (x1, y1, x2, y2)
+                    for band in range(math.floor(min(y1, y2) / OUTLINE_BAND), math.floor(max(y1, y2) / OUTLINE_BAND) + 1):
+                        self.bands.setdefault(band, []).append(edge)
+
+    def __contains__(self, point):
+        x, y = point
+        west, south, east, north = self.box
+        if not (west <= x <= east and south <= y <= north):
+            return False
+        inside = False
+        for x1, y1, x2, y2 in self.bands.get(math.floor(y / OUTLINE_BAND), ()):
+            if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                inside = not inside
+        return inside
+
+
+OUTLINES = {}        # code: Outline, read once from NL-shared/outlines.json
+
+
+def load_outlines():
+    """{code: Outline} from NL-shared/outlines.json (written by fetch and by outline); {} when it is not there."""
+    path = SHARED / 'outlines.json'
+    if OUTLINES.get('_path') != str(path):
+        OUTLINES.clear()
+        try:
+            saved = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return {}
+        OUTLINES.update({code: Outline(geometry) for code, geometry in saved.get('outlines', {}).items()})
+        OUTLINES['_about'] = {k: saved.get(k) for k in ('source', 'licence', 'served_at', 'fetched')}
+        OUTLINES['_path'] = str(path)
+    return {k: v for k, v in OUTLINES.items() if not k.startswith('_')}
+
+
+def where(lon, lat, outlines=None):
+    """The province's name whose official outline holds the point, this province's first; OUTSIDE when none does;
+    this province's own name when there are no outlines (an older fetch)."""
+    outlines = load_outlines() if outlines is None else outlines
+    if not outlines:
+        return NAME
+    for code in [CODE] + [c for c in outlines if c != CODE]:
+        if code in outlines and (lon, lat) in outlines[code]:
+            return PROVINCES[code][0]
+    return OUTSIDE
+
+
+def osm_detail(lon, lat, outlines=None):
+    """The place finder's detail for an OpenStreetMap row: 'Noord-Brabant (OpenStreetMap)', or for a point across the
+    border 'outside the Dutch provinces (OpenStreetMap)'. Geofabrik cuts its extracts by an outline of its own."""
+    return f'{where(lon, lat, outlines)} (OpenStreetMap)'
+
+
+def bag_cut():
+    """How the BAG was cut to this province, for build.json: the field, the value it is compared with, and how the
+    service wrote it in the first row kept."""
+    first = next(addresses(), {})
+    return {'by': 'the record\'s own province field, not the box', 'field': 'provincie_afkorting', 'value': CODE,
+            'compared': 'without case', 'as_written': first.get('prov'),
+            'or_field': 'provincie_naam', 'or_value': NAME, 'or_compared': 'without case or accents',
+            'or_as_written': first.get('prov_name'), 'box_used_for': 'which BAG cells to ask for'}
+
+
+def osm_cut(fetched):
+    """How OpenStreetMap was cut, for build.json."""
+    osm = (fetched.get('files') or {}).get('osm.gpkg.zip') or {}
+    about = (load_outlines() and OUTLINES.get('_about')) or {}
+    return {'by': "Geofabrik's own outline of the province (its extract)", 'extract': osm.get('name'),
+            'places_labelled_by': ('the official outlines, Kadaster BRK Bestuurlijke Gebieden provinciegebied '
+                                   f"(CC BY 4.0, served {about.get('served_at')})") if about else
+                                  'this province (no official outlines fetched yet)',
+            'outside_label': OUTSIDE,
+            'help_points': 'kept as the extract has them: a help point across the border is still one'}
 
 
 def tiles(box=None):
@@ -645,8 +774,14 @@ def fetch_aeds(force=False):
 
 
 def aed_source(saved):
-    """What build.json records about the AED list."""
-    return {k: saved.get(k) for k in ('url', 'osm_as_of', 'fetched', 'licence', 'attribution', 'not_public_left_out')}
+    """What build.json records about the AED list: where and when it was asked, the query, and the size and SHA-256 of
+    source/aeds.json as saved (an Overpass answer is not a file to hash; the saved list is)."""
+    info = {k: saved.get(k) for k in ('url', 'query', 'osm_as_of', 'fetched', 'licence', 'attribution', 'not_public_left_out')}
+    info['points'] = len(saved.get('points') or [])
+    path = SOURCE / 'aeds.json'
+    if path.is_file():
+        info.update({'file': 'source/aeds.json', 'bytes': path.stat().st_size, 'sha256': de.sha256(path)})
+    return info
 
 
 def add_aeds(national, saved):
@@ -799,6 +934,16 @@ def fetch_seh(force=False):
     return xlsx
 
 
+def seh_source():
+    """What build.json records about the RIVM list: NL-shared/seh.json, with the size and SHA-256 of the archive as
+    downloaded and of the spreadsheet in it."""
+    about = json.loads((SHARED / 'seh.json').read_text(encoding='utf-8')) if (SHARED / 'seh.json').exists() else {'title': SEH_TITLE}
+    for key, path in (('archive', SHARED / 'seh.zip'), ('xlsx', SHARED / 'seh.xlsx')):
+        if path.is_file():
+            about[key] = {'file': f'NL-shared/{path.name}', 'bytes': path.stat().st_size, 'sha256': de.sha256(path)}
+    return about
+
+
 def place_at(index, street, postcode):
     """(lat, lon) of a BAG address: the house itself ('Wilhelminalaan 12', '1815JD'), else the first of a range
     ('3-11'), else the middle of its postcode; None when the postcode is not in this index."""
@@ -847,25 +992,29 @@ def add_note(db, label, text):
     db.execute('INSERT OR REPLACE INTO meta VALUES (?, ?)', ('help_points', '; '.join(parts + [f'{label}: {text}'])))
 
 
-def refresh_report(data, counts=None, source=None):
-    """After help points were added in place: build.json's counts, sources and the map file's size and hash, and
-    map-set.json's sizes, follow."""
-    national = data / 'derived' / 'geo' / 'national.sqlite'
-    name = national.relative_to(data).as_posix()
+def refresh_report(data, counts=None, source=None, changed=('national.sqlite',)):
+    """After a map file was changed in place: build.json's counts, its sources (each entry updated, not replaced) and
+    the changed files' size and hash, and map-set.json's sizes, follow."""
+    files = [data / 'derived' / 'geo' / name for name in changed]
     report_path = data / 'build.json'
     if report_path.exists():
         report = json.loads(report_path.read_text(encoding='utf-8'))
         report.setdefault('counts', {}).update(counts or {})
-        report.setdefault('sources', {}).setdefault('files', {}).update(source or {})
-        report.setdefault('outputs', {})[name] = {'bytes': national.stat().st_size, 'sha256': de.sha256(national)}
+        listed = report.setdefault('sources', {}).setdefault('files', {})
+        for key, info in (source or {}).items():
+            listed[key] = {**(listed.get(key) or {}), **info}
+        for f in files:
+            report.setdefault('outputs', {})[f.relative_to(data).as_posix()] = {'bytes': f.stat().st_size, 'sha256': de.sha256(f)}
         report_path.write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding='utf-8')
     map_set = data / 'map-set.json'
     if map_set.exists():
         listed = json.loads(map_set.read_text(encoding='utf-8'))
-        if name in listed.get('files', {}):
-            listed['files'][name] = national.stat().st_size
-            listed['bytes'] = sum(listed['files'].values())
-            map_set.write_text(json.dumps(listed, indent=1), encoding='utf-8')
+        for f in files:
+            name = f.relative_to(data).as_posix()
+            if name in listed.get('files', {}):
+                listed['files'][name] = f.stat().st_size
+        listed['bytes'] = sum(listed.get('files', {}).values())
+        map_set.write_text(json.dumps(listed, indent=1), encoding='utf-8')
 
 
 def seh():
@@ -877,9 +1026,51 @@ def seh():
         return
     placed = add_seh(data / 'derived' / 'geo', xlsx)
     SEH_PLACED.update(placed)
-    about = json.loads((SHARED / 'seh.json').read_text(encoding='utf-8'))
-    refresh_report(data, {'seh': len(placed)}, {'seh.xlsx': about})
+    refresh_report(data, {'seh': len(placed)}, {'seh.xlsx': seh_source()})
     log(REGION, len(placed), 'SEH(s):', ', '.join(name for name, _ in placed) or '-')
+
+
+# ---------------------------------------------------------------- outline ----
+
+def label_places(places, outlines):
+    """Labels every OpenStreetMap row of a place finder by the outline that holds it; returns how many lie outside this
+    province: {'other_province': n, 'outside_provinces': n}."""
+    db = sqlite3.connect(places)
+    try:
+        rows = db.execute("SELECT id, lon, lat FROM place WHERE source = 'OpenStreetMap'").fetchall()
+        labels = [(where(lon, lat, outlines), id_) for id_, lon, lat in rows]
+        db.executemany('UPDATE place SET detail = ? WHERE id = ?', [(f'{label} (OpenStreetMap)', id_) for label, id_ in labels])
+        db.execute("INSERT INTO place_fts(place_fts) VALUES ('rebuild')")
+        db.commit()
+        db.execute('VACUUM')
+    finally:
+        db.close()
+    return {'other_province': sum(1 for label, _ in labels if label not in (NAME, OUTSIDE)),
+            'outside_provinces': sum(1 for label, _ in labels if label == OUTSIDE)}
+
+
+def outline():
+    """Without a rebuild: labels this province's OpenStreetMap places by the official outlines (fetched once into
+    NL-shared/ when not there), and records in build.json how each source was cut and the size and SHA-256 of the AED
+    and SEH files. A later build does all of this itself."""
+    if not (SHARED / 'outlines.json').is_file():
+        fetch_outlines()
+    outlines = load_outlines()
+    data = BASE / 'data'
+    places = data / 'derived' / 'geo' / 'places.sqlite'
+    if not places.is_file():
+        log(REGION, 'is not built yet: its build labels the places itself')
+        return
+    outside = label_places(places, outlines)
+    report = json.loads((data / 'build.json').read_text(encoding='utf-8'))
+    source = {'bag': {'cut': bag_cut()}, 'osm.gpkg.zip': {'cut': osm_cut(report.get('sources') or {})}}
+    if (SOURCE / 'aeds.json').is_file():
+        source['aeds.json'] = aed_source(json.loads((SOURCE / 'aeds.json').read_text(encoding='utf-8')))
+    if (SHARED / 'seh.json').is_file() and 'seh.xlsx' in (report.get('sources') or {}).get('files', {}):
+        source['seh.xlsx'] = seh_source()
+    refresh_report(data, {'osm_places_outside': outside}, source, changed=('places.sqlite',))
+    log(REGION, 'OpenStreetMap places labelled by the official outlines;', outside['other_province'], 'in another province,',
+        outside['outside_provinces'], OUTSIDE)
 
 
 def build_addresses(fetched, geo):
@@ -961,22 +1152,28 @@ def build_places(fetched, geo):
         add('postcode_area', [(c, 'postcode area', NAME, *middle(p)[::-1], 2, source) for c, p in sorted(areas.items())])
         add('postcode', [(f'{c[:4]} {c[4:]}', 'postcode', NAME, *middle(p)[::-1], 2, source) for c, p in sorted(codes.items())])
         add('street', [(s, 'street', f'{w}, {NAME}', *middle(p)[::-1], 3, source) for (s, w), p in sorted(streets.items())])
+        # Geofabrik cuts its extract by an outline of its own, which takes in Baarle-Hertog's Belgian enclaves, so an
+        # OpenStreetMap row is labelled by the official outline that holds it (Noord-Brabant, a neighbour, or OUTSIDE).
+        outlines = load_outlines()
         national = sqlite3.connect(f"file:{geo / 'national.sqlite'}?mode=ro", uri=True)
-        add('osm_point', [(name, cls.replace('_', ' '), f'{NAME} (OpenStreetMap)', lat, lon, 4, 'OpenStreetMap')
+        add('osm_point', [(name, cls.replace('_', ' '), osm_detail(lon, lat, outlines), lat, lon, 4, 'OpenStreetMap')
                           for cls, name, lon, lat in national.execute(
                               "SELECT cls,name,lon,lat FROM poi WHERE name IS NOT NULL AND name<>''")])
         rows = []
         for cls, name, geom in national.execute("SELECT cls,name,geom FROM feat WHERE layer='place' AND name IS NOT NULL"):
             _, _, x, y = struct.unpack_from('<iiii', geom)
-            rows.append((name, cls, f'{NAME} (OpenStreetMap)', y / 1e6, x / 1e6, 1, 'OpenStreetMap'))
+            rows.append((name, cls, osm_detail(x / 1e6, y / 1e6, outlines), y / 1e6, x / 1e6, 1, 'OpenStreetMap'))
         add('osm_place', rows)
         national.close()
+        labels = [detail for detail, in db.execute("SELECT detail FROM place WHERE source = 'OpenStreetMap'")]
+        outside = {'other_province': sum(1 for d in labels if d not in (f'{NAME} (OpenStreetMap)', f'{OUTSIDE} (OpenStreetMap)')),
+                   'outside_provinces': labels.count(f'{OUTSIDE} (OpenStreetMap)')}
         db.execute("INSERT INTO place_fts(place_fts) VALUES ('rebuild')")
         db.commit()
         db.execute('VACUUM')
     finally:
         db.close()
-    return {'places': counts}
+    return {'places': counts, 'osm_places_outside': outside}
 
 
 def build():
@@ -1005,10 +1202,12 @@ def build():
     counts.update(build_addresses(fetched, geo))
     if (SHARED / 'seh.xlsx').is_file():          # placed at their BAG address, so after the address index
         counts['seh'] = len(add_seh(geo, SHARED / 'seh.xlsx'))
-        fetched.setdefault('files', {})['seh.xlsx'] = json.loads((SHARED / 'seh.json').read_text(encoding='utf-8')) \
-            if (SHARED / 'seh.json').exists() else {'title': SEH_TITLE}
+        fetched.setdefault('files', {})['seh.xlsx'] = seh_source()
     log('places')
     counts.update(build_places(fetched, geo))
+    files = fetched.setdefault('files', {})
+    files.setdefault('bag', {})['cut'] = bag_cut()
+    files.setdefault('osm.gpkg.zip', {})['cut'] = osm_cut(fetched)
     map_files = {f.relative_to(staging).as_posix(): f.stat().st_size for f in sorted(geo.glob('*.sqlite'))}
     (staging / 'map-set.json').write_text(json.dumps({'name': REGION, 'files': map_files, 'bytes': sum(map_files.values()),
                                                    'seconds': round(time.time() - started)}, indent=1), encoding='utf-8')
@@ -1165,7 +1364,25 @@ def check(data=None):
     beyond = places.execute('SELECT count(*) FROM place WHERE lon NOT BETWEEN ? AND ? OR lat NOT BETWEEN ? AND ?',
                             (west - .15, east + .15, south - .15, north + .15)).fetchone()[0]
     expect(beyond == 0, f'every place-finder row within {NAME} plus the margin ({beyond} beyond)')
+    outlines = load_outlines()
+    if outlines.get(CODE):
+        claimed = places.execute("SELECT name, lon, lat FROM place WHERE source = 'OpenStreetMap' AND detail = ?",
+                                 (f'{NAME} (OpenStreetMap)',)).fetchall()
+        wrong = [name for name, lon, lat in claimed if (lon, lat) not in outlines[CODE]]
+        expect(not wrong, f'every OpenStreetMap place labelled {NAME} lies inside its official outline '
+                          f'({len(wrong)} do not{": " + ", ".join(wrong[:3]) if wrong else ""})')
+    else:
+        print(f'note  no official outlines in {SHARED.name}/ yet, so OpenStreetMap places are labelled {NAME} '
+              f'(python3 tools/build_region_nl.py outline --province {CODE})')
+    for place, country in EXCLAVES.get(CODE, []):
+        labels = [d for d, in places.execute("SELECT detail FROM place WHERE name = ? AND source = 'OpenStreetMap'", (place,))]
+        expect(bool(labels) and f'{NAME} (OpenStreetMap)' not in labels,
+               f'exclave {place} ({country}) is in the place finder and not labelled {NAME} ({", ".join(sorted(set(labels))) or "not found"})')
     places.close()
+    cut = (report.get('sources', {}).get('files', {}).get('bag') or {}).get('cut') or {}
+    print(('ok    ' if cut else 'note  ') + 'build.json says how the BAG was cut: '
+          + (f"{cut.get('field')} = {cut.get('value')} ({cut.get('compared')}; written {cut.get('as_written')!r})" if cut
+             else f'not yet (outline --province {CODE} adds it)'))
     if not failures:
         print('all checks passed (the data; the app\'s address search has its own tests: app/tests/test_address_nl.py)')
     return failures
@@ -1301,7 +1518,7 @@ def merge(codes=None, out=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge', 'aed', 'seh'))
+    parser.add_argument('step', choices=('fetch', 'build', 'check', 'demo', 'merge', 'aed', 'seh', 'outline'))
     parser.add_argument('--province', required=True, help='two-letter code (' + ', '.join(PROVINCES) + ') or all')
     parser.add_argument('--refresh', action='store_true', help='fetch, aed, seh: download the OpenStreetMap extract, the AEDs and the SEH list even if recent')
     parser.add_argument('--overpass', help='fetch, aed: the Overpass instance to ask first (its .../api/interpreter URL)')
@@ -1329,7 +1546,7 @@ def main():
                 failed.append(REGION)
             continue
         try:
-            {'fetch': fetch, 'build': build, 'demo': demo, 'aed': aed, 'seh': seh}[args.step]()
+            {'fetch': fetch, 'build': build, 'demo': demo, 'aed': aed, 'seh': seh, 'outline': outline}[args.step]()
         except SystemExit as error:     # with all provinces, one that fails does not stop the others
             if len(codes) == 1:
                 raise

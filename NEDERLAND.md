@@ -54,6 +54,17 @@ LASTBOOK_MAP="$PWD/derived/regions/NL/data/derived/geo" .venv/bin/python app/mai
 
 Bouw je een provincie opnieuw, draai `merge` daarna ook opnieuw.
 
+Baarle-Hertog: in Noord-Brabant liggen stukjes België. De adressen (BAG) zijn alleen Nederlandse, maar het
+OpenStreetMap-bestand van Geofabrik neemt die Belgische stukjes mee. Daarom bewaart `fetch` ook de officiële
+provinciegrenzen, en krijgt elke plaats uit OpenStreetMap in de plaatszoeker de provincie die hem echt bevat, of
+"outside the Dutch provinces". Een kaart die al gebouwd was, pas je zo aan zonder opnieuw te bouwen (dit legt ook vast
+hoe elke bron geknipt is en de SHA-256 van de AED- en RIVM-bestanden):
+
+```sh
+python3 tools/build_region_nl.py outline --province all
+python3 tools/build_region_nl.py merge --province all
+```
+
 Waddeneilanden: Texel zit in `NL-NH`; Vlieland, Terschelling, Ameland en Schiermonnikoog in `NL-FR`. De controle eist
 per eiland straten, adressen, de gemeente in de plaatszoeker en een voorbeeldadres; anders faalt de bouw.
 

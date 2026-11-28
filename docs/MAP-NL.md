@@ -108,6 +108,27 @@ Each BAG address names its province. Checked on 25 November 2026 with one addres
 builder compares codes without case and names without accents. Those addresses, and one on each inhabited island, are
 the samples check looks up (`SAMPLE_ADDRESSES`).
 
+## Exclaves: Baarle-Hertog in Baarle-Nassau
+
+Belgian ground lies inside Noord-Brabant: the enclaves of Baarle-Hertog in Baarle-Nassau, some with Dutch ground inside
+them again. The BAG holds Dutch addresses only, so the address index is right as it is. Geofabrik cuts its extracts by
+an outline of its own, and the one for Noord-Brabant takes the Belgian enclaves in: the first build's place finder
+offered the Belgian village Baarle-Hertog as a place in Noord-Brabant. So fetch also keeps the provinces' official
+outlines (`NL-shared/outlines.json`, from the same BRK service, not shipped), and every OpenStreetMap row of the place
+finder is labelled with the province whose outline holds it, or "outside the Dutch provinces". Help points are kept as
+the extract has them, since a pharmacy across the border is still one. check fails when an OpenStreetMap place labelled
+with the province lies outside its outline, and when an exclave named in `EXCLAVES` is labelled with the province.
+
+A map built before the outlines were fetched is labelled in place, without a rebuild; the step fetches the outlines
+first when they are not there, and also records in `build.json` how each source was cut (the BAG field
+`provincie_afkorting` and its value; Geofabrik's extract and the outlines) and the size and SHA-256 of the saved AED
+list and of the RIVM files:
+
+```sh
+python3 tools/build_region_nl.py outline --province all
+python3 tools/build_region_nl.py merge --province all     # the whole-country map takes the new labels
+```
+
 ## How addresses are written
 
 `<street> <number><letter>-<addition>, <postcode> <place>`: "Rotterdamseweg 374A, 2629 HG Delft". Postcodes are four

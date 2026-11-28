@@ -200,6 +200,8 @@ class Boxes(unittest.TestCase):
         self.assertIn('FL', saved['boxes'])                                  # matched by its CBS code
         self.assertIn('GR', saved['fallback_for'])
         self.assertEqual(saved['licence'], nl.BOUNDARY_LICENCE)
+        outlines = json.loads((nl.SHARED / 'outlines.json').read_text(encoding='utf-8'))
+        self.assertEqual(outlines['outlines']['FR']['coordinates'], [mainland, vlieland])     # kept for labelling places
         nl.select('FR')
         self.assertEqual(nl.BBOX, (4.86, 52.79, 6.41, 53.31))                 # with the margin
         nl.select('GR')
@@ -396,6 +398,9 @@ class WholeBuild(unittest.TestCase):
             seh_xlsx(shared / 'seh.xlsx', self.seh_rows)
         with mock.patch.object(nl, 'SHARED', shared):
             nl.select(code)
+            if getattr(self, 'outlines', None):
+                shared.mkdir(parents=True, exist_ok=True)
+                nl.save_outlines({'timeStamp': '2026-11-28T10:00:00Z'}, self.outlines)
             cells = {}
             for f in features:
                 lon, lat = f['geometry']['coordinates']
@@ -506,6 +511,8 @@ class WholeBuild(unittest.TestCase):
         nat.close()
         report = json.loads((geo.parents[1] / 'build.json').read_text(encoding='utf-8'))
         self.assertEqual(report['counts']['aeds'], 2)
+        saved = report['sources']['files']['aeds.json']
+        self.assertEqual((saved['points'], saved['file'], len(saved['sha256'])), (2, 'source/aeds.json', 64))
 
     def test_the_seh_list_goes_into_the_build(self):
         """Reinier de Graaf is placed at its BAG address in the built Zuid-Holland; Groningen's is not this province's."""
@@ -524,6 +531,10 @@ class WholeBuild(unittest.TestCase):
         self.assertEqual([n for n, in nat.execute("SELECT name FROM poi WHERE cls='emergency_department'")],
                          ['SEH 24/7 · Reinier de Graaf (Delft) · huisartsenpost in het gebouw · acute verloskunde'])
         nat.close()
+        report = json.loads((geo.parents[1] / 'build.json').read_text(encoding='utf-8'))
+        xlsx = report['sources']['files']['seh.xlsx']['xlsx']
+        self.assertEqual((xlsx['file'], len(xlsx['sha256'])), ('NL-shared/seh.xlsx', 64))
+        self.assertEqual(report['sources']['files']['bag']['cut']['field'], 'provincie_afkorting')
 
     def test_an_island_left_out_fails_the_check(self):
         """A box or an extract that misses Schiermonnikoog must not pass as Fryslân."""
@@ -534,6 +545,112 @@ class WholeBuild(unittest.TestCase):
         failures, _ = self.build('FR', features, [(5.79 + k * 1e-4, 53.20) for k in range(20)], pois)
         self.assertTrue(any('island Schiermonnikoog' in f for f in failures), failures)
         self.assertTrue(any('Heereweg 8' in f for f in failures), failures)
+
+    def brabant(self, places):
+        """Noord-Brabant around 's-Hertogenbosch, with its sample addresses, help points and the given OSM places."""
+        samples = nl.SAMPLE_ADDRESSES['NB']
+        features = [feature(i, street=street, number=number.rstrip('F'), letter='F' if number.endswith('F') else None,
+                            code=code, place=place, prov='NB', prov_name='Noord-Brabant', lon=5.30, lat=51.69)
+                    for i, (street, number, code, place) in enumerate(samples, 1)]
+        features += [feature(i, street='Kerkstraat', number=str(i), code='5211AB', place="'s-Hertogenbosch", prov='NB',
+                             prov_name='Noord-Brabant', lon=5.30 + i * 1e-5, lat=51.69) for i in range(10, 130)]
+        features += [feature(i, street='Dorpsstraat', number=str(i), code='5241AA', place='Rosmalen', town="'s-Hertogenbosch",
+                             prov='NB', prov_name='Noord-Brabant', lon=5.36, lat=51.71 - i * 1e-5) for i in range(200, 210)]
+        pois = [('hospital', 'Jeroen Bosch Ziekenhuis', 5.29, 51.70), ('pharmacy', 'Apotheek', 5.30, 51.69),
+                ('fire_station', 'Brandweer', 5.31, 51.69), ('police', 'Politie', 5.30, 51.68)]
+        return self.build('NB', features, [(5.30 + k * 1e-4, 51.69) for k in range(30)], pois, places)
+
+    def test_an_exclave_is_labelled_outside_the_province(self):
+        """Baarle-Hertog is Belgian ground inside Noord-Brabant: in the place finder, but not as Noord-Brabant."""
+        self.outlines = {'NB': Outlines.BRABANT, 'ZE': Outlines.ZEELAND}
+        failures, geo = self.brabant([('town', "'s-Hertogenbosch", 5.30, 51.69), ('village', 'Baarle-Hertog', 4.925, 51.445)])
+        self.assertEqual(failures, [])
+        places = sqlite3.connect(geo / 'places.sqlite')
+        self.assertEqual(places.execute("SELECT detail FROM place WHERE name='Baarle-Hertog'").fetchall(),
+                         [('outside the Dutch provinces (OpenStreetMap)',)])
+        self.assertEqual(places.execute("SELECT detail FROM place WHERE name='Jeroen Bosch Ziekenhuis'").fetchall(),
+                         [('Noord-Brabant (OpenStreetMap)',)])
+        places.close()
+        report = json.loads((geo.parents[1] / 'build.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['counts']['osm_places_outside'], {'other_province': 0, 'outside_provinces': 1})
+        cut = report['sources']['files']
+        self.assertEqual((cut['bag']['cut']['value'], cut['bag']['cut']['as_written']), ('NB', 'NB'))
+        self.assertIn('official outlines', cut['osm.gpkg.zip']['cut']['places_labelled_by'])
+
+    def test_an_exclave_labelled_as_the_province_fails_the_check(self):
+        """Without the official outlines every OSM place is labelled Noord-Brabant, Baarle-Hertog too: check says so."""
+        failures, _ = self.brabant([('town', "'s-Hertogenbosch", 5.30, 51.69), ('village', 'Baarle-Hertog', 4.925, 51.445)])
+        self.assertTrue(any('exclave Baarle-Hertog' in f for f in failures), failures)
+
+    def test_the_outline_step_labels_a_built_map_in_place(self):
+        """A province built before the outlines were fetched is labelled afterwards without a rebuild; build.json and
+        map-set.json follow, so check passes on the changed file."""
+        features = [feature(i, number=str(i), lon=4.3700 + i * 1e-5) for i in range(1, 200)]
+        features += [feature(1000, street='Rotterdamseweg', number='374', letter='A', code='2629HG'),
+                     feature(1001, street='Lorentzweg', number='1', code='2628CJ'), feature(1002, number='4'),
+                     feature(1003, street='Burg. Jansenstraat', number='7', code='2611AA', place='Den Haag')]
+        pois = [('hospital', 'Reinier de Graaf', 4.36, 52.01), ('pharmacy', 'Apotheek Delft', 4.358, 52.012),
+                ('fire_station', 'Kazerne Delft', 4.355, 52.0), ('police', 'Politie Delft', 4.357, 52.008)]
+        failures, geo = self.build('ZH', features, [(4.37 + i * 1e-4, 52.0) for i in range(30)], pois,
+                                   [('town', 'Delft', 4.357, 52.011)])
+        self.assertEqual(failures, [])
+        base = geo.parents[2]
+        holland = {'type': 'Polygon', 'coordinates': [[[4.0, 51.9], [4.359, 51.9], [4.359, 52.1], [4.0, 52.1], [4.0, 51.9]]]}
+        with mock.patch.object(nl, 'SHARED', base.parent / 'NL-shared'):
+            nl.select('ZH')
+            with mock.patch.multiple(nl, BASE=base, SOURCE=base / 'source', DATA=base / 'data', MINIMUM=self.LOW,
+                                     log=lambda *a: None):
+                nl.save_outlines({'timeStamp': '2026-11-28T10:00:00Z'}, {'ZH': holland})
+                nl.outline()
+                failures = nl.check(base / 'data')
+        self.assertEqual(failures, [])
+        places = sqlite3.connect(geo / 'places.sqlite')
+        self.assertEqual(places.execute("SELECT detail FROM place WHERE name='Reinier de Graaf'").fetchall(),
+                         [('outside the Dutch provinces (OpenStreetMap)',)])          # east of this test's outline
+        self.assertEqual(places.execute("SELECT detail FROM place WHERE name='Delft' AND source='OpenStreetMap'").fetchall(),
+                         [('Zuid-Holland (OpenStreetMap)',)])
+        hit = places.execute("SELECT p.name FROM place_fts f JOIN place p ON p.id=f.rowid WHERE place_fts MATCH 'outside'").fetchall()
+        places.close()
+        self.assertIn(('Reinier de Graaf',), hit)                    # the text index follows the new label
+        report = json.loads((base / 'data' / 'build.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['counts']['osm_places_outside']['outside_provinces'], 1)
+        self.assertEqual(report['sources']['files']['bag']['cut']['field'], 'provincie_afkorting')
+        self.assertEqual(report['sources']['files']['bag']['served_at'], '2026-11-25T10:00:00Z')   # kept, not replaced
+
+
+class Outlines(unittest.TestCase):
+    """The official outlines decide which province an OpenStreetMap place is in: Geofabrik's Noord-Brabant takes in
+    Baarle-Hertog's Belgian enclaves, which the province's outline leaves out as holes (with Dutch ground in them)."""
+
+    BRABANT = {'type': 'MultiPolygon', 'coordinates': [
+        [[[4.5, 51.3], [5.5, 51.3], [5.5, 51.8], [4.5, 51.8], [4.5, 51.3]],                 # the province
+         [[4.92, 51.43], [4.95, 51.43], [4.95, 51.45], [4.92, 51.45], [4.92, 51.43]]],      # a Belgian enclave: a hole
+        [[[4.93, 51.435], [4.94, 51.435], [4.94, 51.44], [4.93, 51.44], [4.93, 51.435]]]]}  # Dutch ground inside it
+    ZEELAND = {'type': 'Polygon', 'coordinates': [[[3.5, 51.3], [4.5, 51.3], [4.5, 51.7], [3.5, 51.7], [3.5, 51.3]]]}
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch.object(nl, 'SHARED', Path(tmp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_islands_holes_and_ground_inside_a_hole(self):
+        brabant = nl.Outline(self.BRABANT)
+        self.assertIn((5.0, 51.5), brabant)
+        self.assertNotIn((4.925, 51.445), brabant)          # Belgian
+        self.assertIn((4.935, 51.4375), brabant)            # Dutch ground inside the Belgian enclave
+        self.assertNotIn((4.0, 51.5), brabant)              # Zeeland
+        self.assertNotIn((5.0, 52.5), brabant)
+
+    def test_places_are_labelled_by_the_outline_that_holds_them(self):
+        nl.select('NB')
+        self.assertEqual(nl.where(4.925, 51.445), 'Noord-Brabant')          # no outlines yet: this province's name
+        nl.save_outlines({'timeStamp': '2026-11-28T10:00:00Z'}, {'NB': self.BRABANT, 'ZE': self.ZEELAND})
+        self.assertEqual(nl.where(5.0, 51.5), 'Noord-Brabant')
+        self.assertEqual(nl.where(4.0, 51.5), 'Zeeland')
+        self.assertEqual(nl.osm_detail(4.925, 51.445), 'outside the Dutch provinces (OpenStreetMap)')
+        self.assertIn('served 2026-11-28T10:00:00Z', nl.osm_cut({'files': {}})['places_labelled_by'])
 
 
 class AEDs(unittest.TestCase):
